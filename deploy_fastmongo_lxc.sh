@@ -26,6 +26,7 @@ APP_USER="fastmongo"
 APP_GROUP="fastmongo"
 SOURCE_STAGING_DIR=""
 MONGOD_SERVICE=""
+INSTALL_LOG="/tmp/fastmongo-install.log"
 
 MONGO_DB_NAME="${MONGO_DB_NAME:-fastmongo}"
 MONGO_COLLECTION="${MONGO_COLLECTION:-app}"
@@ -50,6 +51,22 @@ API_BIND_PORT="${API_BIND_PORT:-8000}"
 # js_string safely escapes a value for use inside a JS double-quoted string.
 js_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+step() {
+  echo
+  echo "==> $1"
+}
+
+run_quiet() {
+  local description="$1"
+  shift
+  if ! "$@" >>"${INSTALL_LOG}" 2>&1; then
+    echo "Failed during: ${description}"
+    echo "Install log: ${INSTALL_LOG}"
+    tail -n 40 "${INSTALL_LOG}" || true
+    exit 1
+  fi
 }
 
 download_source_archive() {
@@ -80,8 +97,8 @@ cleanup_source_archive() {
 
 install_system_packages() {
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  apt-get install -y --no-install-recommends \
+  run_quiet "apt-get update (system packages)" apt-get -qq update
+  run_quiet "apt-get install (system packages)" apt-get -qq install -y --no-install-recommends \
     ca-certificates \
     gpg \
     openssl \
@@ -107,11 +124,8 @@ install_mongodb() {
   echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/8.0 main" \
     >/etc/apt/sources.list.d/mongodb-org-8.0.list
 
-  apt-get update
-  apt-get install -y mongodb-org || {
-    echo "Failed to install mongodb-org."
-    exit 1
-  }
+  run_quiet "apt-get update (mongodb repo)" apt-get -qq update
+  run_quiet "apt-get install (mongodb-org)" apt-get -qq install -y mongodb-org
 }
 
 prepare_app_user_and_code() {
@@ -337,13 +351,21 @@ print_summary() {
   echo "API expected on: http://${API_BIND_HOST}:${API_BIND_PORT}"
 }
 
+step "Downloading source files"
 download_source_archive
+step "Installing required packages"
 install_system_packages
+step "Installing MongoDB"
 install_mongodb
+step "Preparing application files"
 prepare_app_user_and_code
 cleanup_source_archive
+step "Installing Python dependencies"
 install_python_deps
+step "Configuring MongoDB"
 configure_mongodb
+step "Writing runtime environment"
 write_fastmongo_env
+step "Creating and starting service"
 write_systemd_service
 print_summary
