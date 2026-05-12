@@ -36,6 +36,7 @@ EXPORT_API_KEY = os.getenv("EXPORT_API_KEY")
 GETRECS_ALLOWED_FIELDS_RAW = os.getenv("GETRECS_ALLOWED_FIELDS")
 GENERATE_API_KEY = os.getenv("GENERATE_API_KEY")
 CORS_ORIGINS_RAW = os.getenv("CORS_ORIGINS", "")
+ALLOW_CORS_RAW = os.getenv("ALLOW_CORS", "true")
 
 if not MONGO_WRITER_PASSWORD:
     raise RuntimeError("Missing required env var: MONGO_WRITER_PASSWORD")
@@ -61,10 +62,11 @@ if not GETRECS_ALLOWED_FIELDS:
     raise RuntimeError("GETRECS_ALLOWED_FIELDS must include at least one field name")
 
 CORS_ORIGINS = [o.strip() for o in CORS_ORIGINS_RAW.split(",") if o.strip()]
+ALLOW_CORS = ALLOW_CORS_RAW.strip().lower() in {"1", "true", "yes", "on"}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=CORS_ORIGINS if ALLOW_CORS else [],
     allow_methods=["POST"],
     allow_headers=["Content-Type"],
 )
@@ -262,18 +264,37 @@ def validate_export_api_key(x_api_key: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
+def _is_any_valid_api_key(x_api_key: str | None) -> bool:
+    if not x_api_key:
+        return False
+    return (
+        secrets.compare_digest(x_api_key, WRITE_API_KEY)
+        or secrets.compare_digest(x_api_key, EXPORT_API_KEY)
+        or secrets.compare_digest(x_api_key, GENERATE_API_KEY)
+    )
+
+
+def _require_api_key_when_cors_disabled(x_api_key: str | None) -> None:
+    if ALLOW_CORS:
+        return
+    if not _is_any_valid_api_key(x_api_key):
+        raise HTTPException(status_code=401, detail="API key required when ALLOW_CORS is false")
+
+
 def _check_generate_token_auth(request: Request, x_api_key: str | None) -> None:
     """Allow if caller supplies valid GENERATE_API_KEY or allowed Origin."""
+    _require_api_key_when_cors_disabled(x_api_key)
     if x_api_key and secrets.compare_digest(x_api_key, GENERATE_API_KEY):
         return
     origin = request.headers.get("origin", "")
-    if CORS_ORIGINS and origin in CORS_ORIGINS:
+    if ALLOW_CORS and CORS_ORIGINS and origin in CORS_ORIGINS:
         return
     raise HTTPException(status_code=401, detail="Missing or invalid credentials for /generate-token")
 
 
 @app.get("/health")
-def health() -> Dict[str, str]:
+def health(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Dict[str, str]:
+    _require_api_key_when_cors_disabled(x_api_key)
     return {"status": "ok"}
 
 
@@ -289,7 +310,11 @@ async def generate_token(
 
 
 @app.post("/validate-token", response_model=ValidationResponse)
-async def validate_token(payload: TokenRequest) -> ValidationResponse:
+async def validate_token(
+    payload: TokenRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> ValidationResponse:
+    _require_api_key_when_cors_disabled(x_api_key)
     token_status, decoded = _validate_token(payload.jwt)
     expires_at = decoded.get("exp") if decoded else None
     subject = decoded.get("sub") if decoded else None
@@ -301,6 +326,7 @@ def save_allowed_payload(
     payload: AllowedPayloadRequest,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> AllowedPayloadResponse:
+    _require_api_key_when_cors_disabled(x_api_key)
     validate_write_api_key(x_api_key)
 
     type_name = payload.type_name.strip()
@@ -341,6 +367,7 @@ async def store_package(
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> Dict[str, str]:
+    _require_api_key_when_cors_disabled(x_api_key)
     # Auth before any DB work.
     subject: str | None = None
     auth_method = "jwt"
@@ -380,6 +407,7 @@ def get_records_by_field(
     payload: Dict[str, Any],
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> Dict[str, Any]:
+    _require_api_key_when_cors_disabled(x_api_key)
     validate_export_api_key(x_api_key)
 
     get_field = payload.get("getField")
@@ -405,6 +433,7 @@ def get_records_by_field(
 
 @app.get("/exportdb")
 def export_database(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Response:
+    _require_api_key_when_cors_disabled(x_api_key)
     validate_export_api_key(x_api_key)
 
     db = mongo_client[MONGO_DB_NAME]
