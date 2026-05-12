@@ -12,27 +12,26 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 API_URL="${API_URL:-http://localhost:8000}"
-WRITE_KEY="${WRITE_API_KEY:-}"
-EXPORT_KEY="${EXPORT_API_KEY:-}"
-GENERATE_KEY="${GENERATE_API_KEY:-}"
+API_KEY_VALUE="${API_KEY:-}"
+MASTER_KEY_VALUE="${MASTER_KEY:-}"
 TOKEN_ORIGIN="${TEST_TOKEN_ORIGIN:-${CORS_ORIGINS%%,*}}"
 GET_FIELD="${TEST_GET_FIELD:-package.name}"
 ALLOWED_TYPE="${TEST_ALLOWED_TYPE:-smoke_payload}"
 GET_TAG="${TEST_GET_TAG:-${ALLOWED_TYPE}}"
 TEST_TAG="smoke-$(date +%s)"
 
-if [[ -z "${WRITE_KEY}" ]]; then
-  echo "Missing WRITE_API_KEY (set in environment or .env)"
+if [[ -z "${API_KEY_VALUE}" ]]; then
+  echo "Missing API_KEY (set in environment or .env)"
   exit 1
 fi
 
-if [[ -z "${EXPORT_KEY}" ]]; then
-  echo "Missing EXPORT_API_KEY (set in environment or .env)"
+if [[ -z "${MASTER_KEY_VALUE}" ]]; then
+  echo "Missing MASTER_KEY (set in environment or .env)"
   exit 1
 fi
 
-if [[ -z "${GENERATE_KEY}" && -z "${TOKEN_ORIGIN}" ]]; then
-  echo "Missing GENERATE_API_KEY or TEST_TOKEN_ORIGIN/CORS_ORIGINS for /generate-token test"
+if [[ -z "${API_KEY_VALUE}" && -z "${TOKEN_ORIGIN}" ]]; then
+  echo "Missing API_KEY or TEST_TOKEN_ORIGIN/CORS_ORIGINS for /generate-token test"
   exit 1
 fi
 
@@ -51,7 +50,7 @@ EOF
 )"
 allowed_code="$(curl -s -o /tmp/fastmongo_allowed.json -w "%{http_code}" \
   -X POST "${API_URL}/allowed" \
-  -H "X-API-Key: ${WRITE_KEY}" \
+  -H "X-API-Key: ${MASTER_KEY_VALUE}" \
   -H "Content-Type: application/json" \
   -d "${allowed_payload}")"
 
@@ -63,10 +62,10 @@ fi
 
 echo "3) generate-token + jwt /post test..."
 gen_payload='{"sub":"smoke-user"}'
-if [[ -n "${GENERATE_KEY}" ]]; then
+if [[ -n "${API_KEY_VALUE}" ]]; then
   gen_code="$(curl -s -o /tmp/fastmongo_generate_key.json -w "%{http_code}" \
     -X POST "${API_URL}/generate-token" \
-    -H "X-API-Key: ${GENERATE_KEY}" \
+    -H "X-API-Key: ${API_KEY_VALUE}" \
     -H "Content-Type: application/json" \
     -d "${gen_payload}")"
 else
@@ -120,7 +119,7 @@ EOF
 )"
 apikey_post_code="$(curl -s -o /tmp/fastmongo_post_apikey.json -w "%{http_code}" \
   -X POST "${API_URL}/post" \
-  -H "X-API-Key: ${WRITE_KEY}" \
+  -H "X-API-Key: ${API_KEY_VALUE}" \
   -H "Content-Type: application/json" \
   -d "${apikey_post_payload}")"
 
@@ -137,7 +136,7 @@ EOF
 )"
 getrecs_code="$(curl -s -o /tmp/fastmongo_getrecs.json -w "%{http_code}" \
   -X POST "${API_URL}/getrecs" \
-  -H "X-API-Key: ${EXPORT_KEY}" \
+  -H "X-API-Key: ${API_KEY_VALUE}" \
   -H "Content-Type: application/json" \
   -d "${getrecs_payload}")"
 

@@ -31,10 +31,9 @@ JWT_ISSUER = os.getenv("JWT_ISSUER", "fastjwt-api")
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "fastjwt-clients")
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
-WRITE_API_KEY = os.getenv("WRITE_API_KEY")
-EXPORT_API_KEY = os.getenv("EXPORT_API_KEY")
+API_KEY = os.getenv("API_KEY")
+MASTER_KEY = os.getenv("MASTER_KEY")
 GETRECS_ALLOWED_FIELDS_RAW = os.getenv("GETRECS_ALLOWED_FIELDS")
-GENERATE_API_KEY = os.getenv("GENERATE_API_KEY")
 CORS_ORIGINS_RAW = os.getenv("CORS_ORIGINS", "")
 ALLOW_CORS_RAW = os.getenv("ALLOW_CORS", "true")
 
@@ -44,14 +43,12 @@ if not SECRET_KEY:
     raise RuntimeError("Missing required env var: SECRET_KEY")
 if len(SECRET_KEY) < 32:
     raise RuntimeError("SECRET_KEY must be at least 32 characters")
-if not WRITE_API_KEY:
-    raise RuntimeError("Missing required env var: WRITE_API_KEY")
-if not EXPORT_API_KEY:
-    raise RuntimeError("Missing required env var: EXPORT_API_KEY")
+if not API_KEY:
+    raise RuntimeError("Missing required env var: API_KEY")
+if not MASTER_KEY:
+    raise RuntimeError("Missing required env var: MASTER_KEY")
 if not GETRECS_ALLOWED_FIELDS_RAW:
     raise RuntimeError("Missing required env var: GETRECS_ALLOWED_FIELDS")
-if not GENERATE_API_KEY:
-    raise RuntimeError("Missing required env var: GENERATE_API_KEY")
 
 GETRECS_ALLOWED_FIELDS = {
     field.strip()
@@ -254,23 +251,32 @@ def extract_bearer_token(authorization: str | None) -> str:
     return token
 
 
-def validate_write_api_key(x_api_key: str | None) -> None:
-    if not x_api_key or not secrets.compare_digest(x_api_key, WRITE_API_KEY):
+def _is_master_key(x_api_key: str | None) -> bool:
+    return bool(x_api_key and secrets.compare_digest(x_api_key, MASTER_KEY))
+
+
+def validate_master_api_key(x_api_key: str | None) -> None:
+    if not _is_master_key(x_api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-def validate_export_api_key(x_api_key: str | None) -> None:
-    if not x_api_key or not secrets.compare_digest(x_api_key, EXPORT_API_KEY):
+def validate_api_or_master_key(x_api_key: str | None) -> None:
+    if not x_api_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
+    if (
+        secrets.compare_digest(x_api_key, API_KEY)
+        or secrets.compare_digest(x_api_key, MASTER_KEY)
+    ):
+        return
+    raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 def _is_any_valid_api_key(x_api_key: str | None) -> bool:
     if not x_api_key:
         return False
     return (
-        secrets.compare_digest(x_api_key, WRITE_API_KEY)
-        or secrets.compare_digest(x_api_key, EXPORT_API_KEY)
-        or secrets.compare_digest(x_api_key, GENERATE_API_KEY)
+        secrets.compare_digest(x_api_key, API_KEY)
+        or secrets.compare_digest(x_api_key, MASTER_KEY)
     )
 
 
@@ -282,9 +288,10 @@ def _require_api_key_when_cors_disabled(x_api_key: str | None) -> None:
 
 
 def _check_generate_token_auth(request: Request, x_api_key: str | None) -> None:
-    """Allow if caller supplies valid GENERATE_API_KEY or allowed Origin."""
+    """Allow if caller supplies API key or allowed Origin."""
     _require_api_key_when_cors_disabled(x_api_key)
-    if x_api_key and secrets.compare_digest(x_api_key, GENERATE_API_KEY):
+    if x_api_key:
+        validate_api_or_master_key(x_api_key)
         return
     origin = request.headers.get("origin", "")
     if ALLOW_CORS and CORS_ORIGINS and origin in CORS_ORIGINS:
@@ -327,7 +334,7 @@ def save_allowed_payload(
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> AllowedPayloadResponse:
     _require_api_key_when_cors_disabled(x_api_key)
-    validate_write_api_key(x_api_key)
+    validate_master_api_key(x_api_key)
 
     type_name = payload.type_name.strip()
     if not type_name:
@@ -372,7 +379,7 @@ async def store_package(
     subject: str | None = None
     auth_method = "jwt"
     if x_api_key:
-        validate_write_api_key(x_api_key)
+        validate_api_or_master_key(x_api_key)
         auth_method = "api_key"
     else:
         token = extract_bearer_token(authorization)
@@ -408,7 +415,7 @@ def get_records_by_field(
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> Dict[str, Any]:
     _require_api_key_when_cors_disabled(x_api_key)
-    validate_export_api_key(x_api_key)
+    validate_api_or_master_key(x_api_key)
 
     get_field = payload.get("getField")
     get_tag = payload.get("getTag")
@@ -434,7 +441,7 @@ def get_records_by_field(
 @app.get("/exportdb")
 def export_database(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Response:
     _require_api_key_when_cors_disabled(x_api_key)
-    validate_export_api_key(x_api_key)
+    validate_master_api_key(x_api_key)
 
     db = mongo_client[MONGO_DB_NAME]
     now = datetime.now(timezone.utc)

@@ -4,13 +4,12 @@
 
 ## What it provides
 
-- `POST /generate-token`: mint JWTs (requires `GENERATE_API_KEY` or allowed browser `Origin`)
+- `POST /generate-token`: mint JWTs (requires `API_KEY` or allowed browser `Origin`)
 - `POST /validate-token`: validate JWTs
-- `POST /allowed`: define allowed payload types/fields/max size for `/post` (`WRITE_API_KEY` required)
-- `POST /post`: store a payload (JWT via `Authorization: Bearer` or API key via `X-API-Key: WRITE_API_KEY`)
-- `POST /keypost`: store a payload using `WRITE_API_KEY` (no allowed-type check)
-- `POST /getrecs`: query records by allowed field using `EXPORT_API_KEY`
-- `GET /exportdb`: export full DB using `EXPORT_API_KEY`
+- `POST /allowed`: define allowed payload types/fields/max size for `/post` (`MASTER_KEY` required)
+- `POST /post`: store a payload (JWT via `Authorization: Bearer` or API key via `X-API-Key: API_KEY` or `MASTER_KEY`)
+- `POST /getrecs`: query records by allowed field using `API_KEY` or `MASTER_KEY`
+- `GET /exportdb`: export full DB using `MASTER_KEY`
 - `GET /health`: health check
 
 ## LXC deployment
@@ -48,9 +47,8 @@ Use `.env.example` as your base for secrets and config values.
 Required values:
 - `MONGO_WRITER_PASSWORD`
 - `SECRET_KEY` (32+ chars)
-- `WRITE_API_KEY`
-- `EXPORT_API_KEY`
-- `GENERATE_API_KEY`
+- `API_KEY`
+- `MASTER_KEY`
 - `GETRECS_ALLOWED_FIELDS`
 
 Common optional values:
@@ -73,7 +71,7 @@ Generate a token:
 
 ```bash
 curl -X POST http://localhost:8000/generate-token \
-  -H "X-API-Key: <GENERATE_API_KEY>" \
+  -H "X-API-Key: <API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"sub":"user-123"}'
 ```
@@ -83,7 +81,7 @@ Store with JWT (`/post`):
 ```bash
 # First define allowed payload type/fields/max size:
 curl -X POST http://localhost:8000/allowed \
-  -H "X-API-Key: <WRITE_API_KEY>" \
+  -H "X-API-Key: <MASTER_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"type_name":"example","fields":["version","metadata"],"max_size":"64KB"}'
 
@@ -98,18 +96,9 @@ Store with API key (`/post`):
 
 ```bash
 curl -X POST http://localhost:8000/post \
-  -H "X-API-Key: <WRITE_API_KEY>" \
+  -H "X-API-Key: <API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"type_name":"example","version":1,"metadata":{"owner":"team-a"}}'
-```
-
-Store with API key (`/keypost`):
-
-```bash
-curl -X POST http://localhost:8000/keypost \
-  -H "X-API-Key: <WRITE_API_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"any-shape","version":1}'
 ```
 
 Validate a token:
@@ -124,7 +113,7 @@ Query records:
 
 ```bash
 curl -X POST http://localhost:8000/getrecs \
-  -H "X-API-Key: <EXPORT_API_KEY>" \
+  -H "X-API-Key: <API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"getField":"package.name","getTag":"example"}'
 ```
@@ -133,7 +122,7 @@ Export DB:
 
 ```bash
 curl -X GET http://localhost:8000/exportdb \
-  -H "X-API-Key: <EXPORT_API_KEY>" \
+  -H "X-API-Key: <MASTER_KEY>" \
   -o fastmongo-export.json
 ```
 
@@ -152,6 +141,5 @@ API smoke test (reads `.env` if present):
 ```
 
 Smoke test requirements:
-- `WRITE_API_KEY`
-- `EXPORT_API_KEY`
-- `GENERATE_API_KEY` (recommended), or `TEST_TOKEN_ORIGIN` / `CORS_ORIGINS`
+- `MASTER_KEY`
+- `API_KEY` (recommended), or `TEST_TOKEN_ORIGIN` / `CORS_ORIGINS`
