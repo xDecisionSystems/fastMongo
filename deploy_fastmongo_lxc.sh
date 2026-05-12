@@ -27,6 +27,7 @@ APP_GROUP="fastmongo"
 SOURCE_STAGING_DIR=""
 MONGOD_SERVICE=""
 INSTALL_LOG="/tmp/fastmongo-install.log"
+VERSION_KEY_NAME="wombat"
 
 MONGO_DB_NAME="${MONGO_DB_NAME:-fastmongo}"
 MONGO_COLLECTION="${MONGO_COLLECTION:-app}"
@@ -341,6 +342,7 @@ EOF_SERVICE
 print_summary() {
   echo
   echo "Deployment complete."
+  echo "Version key: ${VERSION_KEY_NAME}"
   echo "fastMongo API service: systemctl status fastmongo-api"
   echo "MongoDB service:       systemctl status ${MONGOD_SERVICE}"
   echo
@@ -351,6 +353,7 @@ print_summary() {
   echo "API expected on: http://${API_BIND_HOST}:${API_BIND_PORT}"
 }
 
+echo "Version key: ${VERSION_KEY_NAME}"
 step "Downloading source files"
 download_source_archive
 step "Installing required packages"
