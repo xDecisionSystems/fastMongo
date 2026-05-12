@@ -22,31 +22,34 @@ MONGO_HOST = os.getenv("MONGO_HOST", "127.0.0.1")
 MONGO_PORT = int(os.getenv("MONGO_PORT", "27017"))
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "fastmongo")
 MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "app")
-MONGO_WRITER_USERNAME = os.getenv("MONGO_WRITER_USERNAME", "writer")
-MONGO_WRITER_PASSWORD = os.getenv("MONGO_WRITER_PASSWORD")
+MONGO_READER_USERNAME = "reader"
+MONGO_READER_PASSWORD = os.getenv("MONGO_READER_PASSWORD")
 
 SECRET_KEY = os.getenv("SECRET_KEY")
-JWT_EXPIRATION_MINUTES = int(os.getenv("JWT_EXPIRATION_MINUTES", "20"))
+JWT_EXPIRATION_MINUTES = int(os.getenv("JWT_EXPIRATION_MINUTES", "30"))
 JWT_ISSUER = os.getenv("JWT_ISSUER", "fastjwt-api")
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "fastjwt-clients")
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
-API_KEY = os.getenv("API_KEY")
-MASTER_KEY = os.getenv("MASTER_KEY")
+API_WRITE_KEY = os.getenv("API_WRITE_KEY")
+API_READ_KEY = os.getenv("API_READ_KEY")
+API_MASTER_KEY = os.getenv("API_MASTER_KEY")
 GETRECS_ALLOWED_FIELDS_RAW = os.getenv("GETRECS_ALLOWED_FIELDS")
 CORS_ORIGINS_RAW = os.getenv("CORS_ORIGINS", "")
 ALLOW_CORS_RAW = os.getenv("ALLOW_CORS", "true")
 
-if not MONGO_WRITER_PASSWORD:
-    raise RuntimeError("Missing required env var: MONGO_WRITER_PASSWORD")
+if not MONGO_READER_PASSWORD:
+    raise RuntimeError("Missing required env var: MONGO_READER_PASSWORD")
 if not SECRET_KEY:
     raise RuntimeError("Missing required env var: SECRET_KEY")
 if len(SECRET_KEY) < 32:
     raise RuntimeError("SECRET_KEY must be at least 32 characters")
-if not API_KEY:
-    raise RuntimeError("Missing required env var: API_KEY")
-if not MASTER_KEY:
-    raise RuntimeError("Missing required env var: MASTER_KEY")
+if not API_WRITE_KEY:
+    raise RuntimeError("Missing required env var: API_WRITE_KEY")
+if not API_READ_KEY:
+    raise RuntimeError("Missing required env var: API_READ_KEY")
+if not API_MASTER_KEY:
+    raise RuntimeError("Missing required env var: API_MASTER_KEY")
 if not GETRECS_ALLOWED_FIELDS_RAW:
     raise RuntimeError("Missing required env var: GETRECS_ALLOWED_FIELDS")
 
@@ -71,8 +74,8 @@ app.add_middleware(
 mongo_client = MongoClient(
     host=MONGO_HOST,
     port=MONGO_PORT,
-    username=MONGO_WRITER_USERNAME,
-    password=MONGO_WRITER_PASSWORD,
+    username=MONGO_READER_USERNAME,
+    password=MONGO_READER_PASSWORD,
     authSource=MONGO_DB_NAME,
 )
 mongo_collection = mongo_client[MONGO_DB_NAME][MONGO_COLLECTION]
@@ -252,7 +255,7 @@ def extract_bearer_token(authorization: str | None) -> str:
 
 
 def _is_master_key(x_api_key: str | None) -> bool:
-    return bool(x_api_key and secrets.compare_digest(x_api_key, MASTER_KEY))
+    return bool(x_api_key and secrets.compare_digest(x_api_key, API_MASTER_KEY))
 
 
 def validate_master_api_key(x_api_key: str | None) -> None:
@@ -260,12 +263,23 @@ def validate_master_api_key(x_api_key: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-def validate_api_or_master_key(x_api_key: str | None) -> None:
+def validate_write_or_master_api_key(x_api_key: str | None) -> None:
     if not x_api_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
     if (
-        secrets.compare_digest(x_api_key, API_KEY)
-        or secrets.compare_digest(x_api_key, MASTER_KEY)
+        secrets.compare_digest(x_api_key, API_WRITE_KEY)
+        or secrets.compare_digest(x_api_key, API_MASTER_KEY)
+    ):
+        return
+    raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+def validate_read_or_master_api_key(x_api_key: str | None) -> None:
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    if (
+        secrets.compare_digest(x_api_key, API_READ_KEY)
+        or secrets.compare_digest(x_api_key, API_MASTER_KEY)
     ):
         return
     raise HTTPException(status_code=401, detail="Invalid API key")
@@ -275,8 +289,9 @@ def _is_any_valid_api_key(x_api_key: str | None) -> bool:
     if not x_api_key:
         return False
     return (
-        secrets.compare_digest(x_api_key, API_KEY)
-        or secrets.compare_digest(x_api_key, MASTER_KEY)
+        secrets.compare_digest(x_api_key, API_WRITE_KEY)
+        or secrets.compare_digest(x_api_key, API_READ_KEY)
+        or secrets.compare_digest(x_api_key, API_MASTER_KEY)
     )
 
 
@@ -288,10 +303,10 @@ def _require_api_key_when_cors_disabled(x_api_key: str | None) -> None:
 
 
 def _check_generate_token_auth(request: Request, x_api_key: str | None) -> None:
-    """Allow if caller supplies API key or allowed Origin."""
+    """Allow if caller supplies write/master key or allowed Origin."""
     _require_api_key_when_cors_disabled(x_api_key)
     if x_api_key:
-        validate_api_or_master_key(x_api_key)
+        validate_write_or_master_api_key(x_api_key)
         return
     origin = request.headers.get("origin", "")
     if ALLOW_CORS and CORS_ORIGINS and origin in CORS_ORIGINS:
@@ -321,7 +336,7 @@ async def validate_token(
     payload: TokenRequest,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> ValidationResponse:
-    _require_api_key_when_cors_disabled(x_api_key)
+    validate_write_or_master_api_key(x_api_key)
     token_status, decoded = _validate_token(payload.jwt)
     expires_at = decoded.get("exp") if decoded else None
     subject = decoded.get("sub") if decoded else None
@@ -379,7 +394,7 @@ async def store_package(
     subject: str | None = None
     auth_method = "jwt"
     if x_api_key:
-        validate_api_or_master_key(x_api_key)
+        validate_write_or_master_api_key(x_api_key)
         auth_method = "api_key"
     else:
         token = extract_bearer_token(authorization)
@@ -415,7 +430,7 @@ def get_records_by_field(
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> Dict[str, Any]:
     _require_api_key_when_cors_disabled(x_api_key)
-    validate_api_or_master_key(x_api_key)
+    validate_read_or_master_api_key(x_api_key)
 
     get_field = payload.get("getField")
     get_tag = payload.get("getTag")

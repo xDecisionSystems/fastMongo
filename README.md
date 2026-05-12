@@ -4,12 +4,12 @@
 
 ## What it provides
 
-- `POST /generate-token`: mint JWTs (requires `API_KEY` or allowed browser `Origin`)
-- `POST /validate-token`: validate JWTs
-- `POST /allowed`: define allowed payload types/fields/max size for `/post` (`MASTER_KEY` required)
-- `POST /post`: store a payload (JWT via `Authorization: Bearer` or API key via `X-API-Key: API_KEY` or `MASTER_KEY`)
-- `POST /getrecs`: query records by allowed field using `API_KEY` or `MASTER_KEY`
-- `GET /exportdb`: export full DB using `MASTER_KEY`
+- `POST /generate-token`: mint JWTs (requires `API_WRITE_KEY` or `API_MASTER_KEY`, or allowed browser `Origin`)
+- `POST /validate-token`: validate JWTs (`API_WRITE_KEY` or `API_MASTER_KEY` required)
+- `POST /allowed`: define allowed payload types/fields/max size for `/post` (`API_MASTER_KEY` required)
+- `POST /post`: store a payload (JWT via `Authorization: Bearer` or API key via `X-API-Key: API_WRITE_KEY` or `API_MASTER_KEY`)
+- `POST /getrecs`: query records by allowed field using `API_READ_KEY` or `API_MASTER_KEY`
+- `GET /exportdb`: export full DB using `API_MASTER_KEY`
 - `GET /health`: health check
 
 ## LXC deployment
@@ -28,7 +28,7 @@ What the script does:
 - Installs MongoDB and runtime dependencies
 - Copies downloaded source into `/opt/fastmongo`
 - Creates a Python virtualenv and installs API dependencies
-- Creates MongoDB writer/reader users
+- Creates MongoDB writer user and reader user (reader is used by the API runtime)
 - Writes runtime env file to `/etc/fastmongo/fastmongo.env`
 - Creates and starts `fastmongo-api` systemd service
 
@@ -45,10 +45,11 @@ curl http://127.0.0.1:8000/health
 Use `.env.example` as your base for secrets and config values.
 
 Required values:
-- `MONGO_WRITER_PASSWORD`
+- `MONGO_READER_PASSWORD`
 - `SECRET_KEY` (32+ chars)
-- `API_KEY`
-- `MASTER_KEY`
+- `API_WRITE_KEY`
+- `API_READ_KEY`
+- `API_MASTER_KEY`
 - `GETRECS_ALLOWED_FIELDS`
 
 Common optional values:
@@ -56,8 +57,7 @@ Common optional values:
 - `MONGO_PORT` (default: `27017`)
 - `MONGO_DB_NAME` (default: `fastmongo`)
 - `MONGO_COLLECTION` (default: `app`)
-- `MONGO_WRITER_USERNAME` (default: `writer`)
-- `JWT_EXPIRATION_MINUTES` (default: `20`)
+- `JWT_EXPIRATION_MINUTES` (default: `30`)
 - `JWT_ISSUER` (default: `fastjwt-api`)
 - `JWT_AUDIENCE` (default: `fastjwt-clients`)
 - `RATE_LIMIT_REQUESTS` (default: `60`, `0` disables)
@@ -65,13 +65,16 @@ Common optional values:
 - `CORS_ORIGINS` (optional browser allowlist for `/generate-token`)
 - `API_URL` (test script only — not read by the service; default: `http://localhost:8000`)
 
+`GETRECS_ALLOWED_FIELDS` must contain Mongo dotted field paths that exist in stored documents.
+`/post` stores payloads under the `package` key (for example `package.type_name`).
+
 ## API examples
 
 Generate a token:
 
 ```bash
 curl -X POST http://localhost:8000/generate-token \
-  -H "X-API-Key: <API_KEY>" \
+  -H "X-API-Key: <API_WRITE_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"sub":"user-123"}'
 ```
@@ -81,7 +84,7 @@ Store with JWT (`/post`):
 ```bash
 # First define allowed payload type/fields/max size:
 curl -X POST http://localhost:8000/allowed \
-  -H "X-API-Key: <MASTER_KEY>" \
+  -H "X-API-Key: <API_MASTER_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"type_name":"example","fields":["version","metadata"],"max_size":"64KB"}'
 
@@ -92,11 +95,11 @@ curl -X POST http://localhost:8000/post \
   -d '{"type_name":"example","version":1,"metadata":{"owner":"team-a"}}'
 ```
 
-Store with API key (`/post`):
+Store with API key or MASTER API key (`/post`):
 
 ```bash
 curl -X POST http://localhost:8000/post \
-  -H "X-API-Key: <API_KEY>" \
+  -H "X-API-Key: <API_WRITE_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"type_name":"example","version":1,"metadata":{"owner":"team-a"}}'
 ```
@@ -105,6 +108,7 @@ Validate a token:
 
 ```bash
 curl -X POST http://localhost:8000/validate-token \
+  -H "X-API-Key: <API_WRITE_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"jwt":"<token>"}'
 ```
@@ -113,16 +117,16 @@ Query records:
 
 ```bash
 curl -X POST http://localhost:8000/getrecs \
-  -H "X-API-Key: <API_KEY>" \
+  -H "X-API-Key: <API_READ_KEY>" \
   -H "Content-Type: application/json" \
-  -d '{"getField":"package.name","getTag":"example"}'
+  -d '{"getField":"package.type_name","getTag":"example"}'
 ```
 
-Export DB:
+Export DB, requires MASTER API key:
 
 ```bash
 curl -X GET http://localhost:8000/exportdb \
-  -H "X-API-Key: <MASTER_KEY>" \
+  -H "X-API-Key: <API_MASTER_KEY>" \
   -o fastmongo-export.json
 ```
 
@@ -141,5 +145,6 @@ API smoke test (reads `.env` if present):
 ```
 
 Smoke test requirements:
-- `MASTER_KEY`
-- `API_KEY` (recommended), or `TEST_TOKEN_ORIGIN` / `CORS_ORIGINS`
+- `API_MASTER_KEY`
+- `API_WRITE_KEY`
+- `API_READ_KEY`
