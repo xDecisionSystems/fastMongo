@@ -25,6 +25,7 @@ APP_DIR="/opt/fastmongo"
 APP_USER="fastmongo"
 APP_GROUP="fastmongo"
 SOURCE_STAGING_DIR=""
+MONGOD_SERVICE=""
 
 MONGO_DB_NAME="${MONGO_DB_NAME:-fastmongo}"
 MONGO_COLLECTION="${MONGO_COLLECTION:-app}"
@@ -82,8 +83,6 @@ install_system_packages() {
   apt-get update
   apt-get install -y --no-install-recommends \
     ca-certificates \
-    gpg \
-    lsb-release \
     openssl \
     python3 \
     python3-pip \
@@ -99,33 +98,8 @@ install_mongodb() {
     return
   fi
 
-  # Prefer distro packages if available.
-  if apt-cache show mongodb-org >/dev/null 2>&1; then
-    apt-get install -y mongodb-org
-    return
-  fi
-  if apt-cache show mongodb >/dev/null 2>&1; then
-    apt-get install -y mongodb
-    return
-  fi
-  if apt-cache show mongodb-server >/dev/null 2>&1; then
-    apt-get install -y mongodb-server
-    return
-  fi
-
-  # Fallback: add MongoDB official apt repo.
-  # Debian 13 codename is expected to be trixie.
-  CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME:-trixie}")"
-  install -d -m 0755 /usr/share/keyrings
-  wget -qO- https://pgp.mongodb.com/server-8.0.asc | gpg --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
-  echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/debian ${CODENAME}/mongodb-org/8.0 main" \
-    >/etc/apt/sources.list.d/mongodb-org-8.0.list
-
-  apt-get update
-  apt-get install -y mongodb-org || {
-    echo "Failed to install mongodb-org for codename '${CODENAME}'."
-    echo "If MongoDB does not yet publish packages for this Debian release,"
-    echo "set up a supported repository and rerun."
+  apt-get install -y mongodb || {
+    echo "Failed to install mongodb from distro packages."
     exit 1
   }
 }
@@ -147,13 +121,35 @@ install_python_deps() {
 }
 
 configure_mongodb() {
-  # Start without auth to create users, then enable auth.
-  systemctl enable mongod || true
-  systemctl start mongod
+  # Detect the MongoDB service unit name (distro packages may use 'mongodb').
+  if systemctl list-unit-files mongod.service &>/dev/null && \
+     systemctl list-unit-files mongod.service | grep -q mongod.service; then
+    MONGOD_SERVICE="mongod"
+  elif systemctl list-unit-files mongodb.service &>/dev/null && \
+       systemctl list-unit-files mongodb.service | grep -q mongodb.service; then
+    MONGOD_SERVICE="mongodb"
+  else
+    echo "Could not find a mongod or mongodb systemd service unit."
+    exit 1
+  fi
+
+  systemctl enable "${MONGOD_SERVICE}" || true
+  systemctl start "${MONGOD_SERVICE}"
+
+  # Detect available mongo shell (mongosh or legacy mongo).
+  local mongo_shell
+  if command -v mongosh >/dev/null 2>&1; then
+    mongo_shell="mongosh"
+  elif command -v mongo >/dev/null 2>&1; then
+    mongo_shell="mongo"
+  else
+    echo "No MongoDB shell (mongosh or mongo) found after install."
+    exit 1
+  fi
 
   # Wait for mongod to accept connections.
   local attempts=0
-  until mongosh --quiet --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; do
+  until ${mongo_shell} --quiet --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; do
     attempts=$(( attempts + 1 ))
     if [[ "${attempts}" -ge 30 ]]; then
       echo "MongoDB did not become ready in time."
@@ -162,7 +158,7 @@ configure_mongodb() {
     sleep 1
   done
 
-  mongosh --quiet <<EOF_MONGO
+  ${mongo_shell} --quiet <<EOF_MONGO
 const dbName = "$(js_string "${MONGO_DB_NAME}")";
 const writerUser = "$(js_string "${MONGO_WRITER_USERNAME}")";
 const writerPass = "$(js_string "${MONGO_WRITER_PASSWORD}")";
@@ -225,7 +221,7 @@ else:
 open(path, 'w').write(text)
 EOF_PY
 
-  systemctl restart mongod
+  systemctl restart "${MONGOD_SERVICE}"
 }
 
 write_fastmongo_env() {
@@ -285,9 +281,9 @@ write_systemd_service() {
   cat >/etc/systemd/system/fastmongo-api.service <<EOF_SERVICE
 [Unit]
 Description=fastMongo FastAPI service
-After=network-online.target mongod.service
+After=network-online.target ${MONGOD_SERVICE}.service
 Wants=network-online.target
-Requires=mongod.service
+Requires=${MONGOD_SERVICE}.service
 
 [Service]
 Type=simple
@@ -320,7 +316,7 @@ print_summary() {
   echo
   echo "Deployment complete."
   echo "fastMongo API service: systemctl status fastmongo-api"
-  echo "MongoDB service:       systemctl status mongod"
+  echo "MongoDB service:       systemctl status ${MONGOD_SERVICE}"
   echo
   echo "Runtime configuration: /etc/fastmongo/fastmongo.env"
   echo "  (contains API keys, JWT secret, and DB credentials — readable by root and the fastmongo group)"
