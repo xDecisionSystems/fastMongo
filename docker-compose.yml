@@ -1,0 +1,46 @@
+services:
+  mongo:
+    build:
+      context: ./mongo
+    container_name: fastmongo-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?MONGO_INITDB_ROOT_PASSWORD is required}
+      MONGO_DB_NAME: ${MONGO_DB_NAME:-fastmongo}
+      MONGO_WRITER_PASSWORD: ${MONGO_WRITER_PASSWORD:?MONGO_WRITER_PASSWORD is required}
+      MONGO_READER_PASSWORD: ${MONGO_READER_PASSWORD:?MONGO_READER_PASSWORD is required}
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  api:
+    build:
+      context: ./api
+    container_name: fastmongo-api
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_DB_NAME: ${MONGO_DB_NAME:?MONGO_DB_NAME is required}
+      MONGO_COLLECTION: ${MONGO_COLLECTION:-packages}
+      MONGO_WRITER_USERNAME: writer
+      MONGO_WRITER_PASSWORD: ${MONGO_WRITER_PASSWORD:?MONGO_WRITER_PASSWORD is required}
+      FASTJWT_URL: ${FASTJWT_URL:?FASTJWT_URL is required}
+      FASTJWT_VALIDATE_PATH: ${FASTJWT_VALIDATE_PATH:-/validate-key}
+      WRITE_API_KEY: ${WRITE_API_KEY:?WRITE_API_KEY is required}
+      EXPORT_API_KEY: ${EXPORT_API_KEY:?EXPORT_API_KEY is required}
+      GETRECS_ALLOWED_FIELDS: ${GETRECS_ALLOWED_FIELDS:?GETRECS_ALLOWED_FIELDS is required}
+    ports:
+      - "8000:8000"
+
+volumes:
+  mongo-data:
