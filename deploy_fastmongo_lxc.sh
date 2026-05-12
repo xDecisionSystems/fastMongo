@@ -27,7 +27,7 @@ APP_GROUP="fastmongo"
 SOURCE_STAGING_DIR=""
 MONGOD_SERVICE=""
 INSTALL_LOG="/tmp/fastmongo-install.log"
-VERSION_KEY_NAME="wombat"
+VERSION_KEY_NAME="kitten"
 
 MONGO_DB_NAME="${MONGO_DB_NAME:-fastmongo}"
 MONGO_COLLECTION="${MONGO_COLLECTION:-app}"
@@ -183,7 +183,8 @@ configure_mongodb() {
     sleep 1
   done
 
-  ${mongo_shell} --quiet <<EOF_MONGO
+  local mongo_user_setup
+  mongo_user_setup="$(cat <<EOF_MONGO
 const dbName = "$(js_string "${MONGO_DB_NAME}")";
 const writerUser = "$(js_string "${MONGO_WRITER_USERNAME}")";
 const writerPass = "$(js_string "${MONGO_WRITER_PASSWORD}")";
@@ -208,6 +209,8 @@ if (!targetDb.getUser(readerUser)) {
   });
 }
 EOF_MONGO
+)"
+  "${mongo_shell}" --quiet --eval "${mongo_user_setup}" >/dev/null
 
   # Enable authentication so the users created above are enforced.
   local mongod_conf
