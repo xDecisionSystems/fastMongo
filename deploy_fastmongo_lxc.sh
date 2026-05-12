@@ -83,6 +83,7 @@ install_system_packages() {
   apt-get update
   apt-get install -y --no-install-recommends \
     ca-certificates \
+    gpg \
     openssl \
     python3 \
     python3-pip \
@@ -98,8 +99,17 @@ install_mongodb() {
     return
   fi
 
-  apt-get install -y mongodb || {
-    echo "Failed to install mongodb from distro packages."
+  # Debian trixie does not ship a mongodb-server package.
+  # Use the official MongoDB 8.0 repo targeting bookworm (binary-compatible with trixie).
+  install -d -m 0755 /usr/share/keyrings
+  wget -qO- https://pgp.mongodb.com/server-8.0.asc \
+    | gpg --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
+  echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/8.0 main" \
+    >/etc/apt/sources.list.d/mongodb-org-8.0.list
+
+  apt-get update
+  apt-get install -y mongodb-org || {
+    echo "Failed to install mongodb-org."
     exit 1
   }
 }
