@@ -7,6 +7,13 @@
 
 The API accepts JSON payloads, validates JWTs through `fastJWT`, stores data in MongoDB, and can export the full database with a separate API key.
 
+## Agent quickstart checklist
+
+1. Copy `.env.example` to `.env` and set keys/passwords.
+2. Start stack: `docker compose up --build`.
+3. Verify API health: `curl http://localhost:8000/health`.
+4. Run smoke tests: `./tests/test_api.sh`.
+
 ## Services
 
 ### MongoDB service
@@ -45,10 +52,46 @@ cp .env.example .env
 - `GETRECS_ALLOWED_FIELDS` (comma-separated allowlist for `/getrecs`, e.g. `package.name,package.metadata.owner`)
 - `MONGO_INITDB_ROOT_PASSWORD`, `MONGO_WRITER_PASSWORD`, `MONGO_READER_PASSWORD` (required — no defaults)
 
+Minimum working `.env` example:
+
+```env
+MONGO_INITDB_ROOT_USERNAME=root
+MONGO_INITDB_ROOT_PASSWORD=changeme
+MONGO_DB_NAME=fastmongo
+MONGO_WRITER_PASSWORD=changeme
+MONGO_READER_PASSWORD=changeme
+MONGO_COLLECTION=packages
+FASTJWT_URL=http://fastjwt:8000
+FASTJWT_VALIDATE_PATH=/validate-key
+WRITE_API_KEY=replace-with-strong-write-key
+EXPORT_API_KEY=replace-with-strong-export-key
+GETRECS_ALLOWED_FIELDS=package.name,package.version
+```
+
 3. Start:
 
 ```bash
 docker compose up --build
+```
+
+## Testing scripts
+
+Run quick syntax checks:
+
+```bash
+./tests/test_syntax.sh
+```
+
+Run API smoke tests (expects the stack to be running and keys set in `.env`):
+
+```bash
+./tests/test_api.sh
+```
+
+Optional override for `getrecs` query field:
+
+```bash
+TEST_GET_FIELD=package.version ./tests/test_api.sh
 ```
 
 ## API usage
@@ -87,6 +130,16 @@ curl -X POST http://localhost:8000/keypost \
   -d '{"name": "example", "version": 1, "metadata": {"owner": "team-a"}}'
 ```
 
+`/keypost` success response schema:
+
+```json
+{
+  "status": "stored",
+  "id": "string",
+  "stored_at": "ISO-8601 timestamp"
+}
+```
+
 ### Fetch records by field/tag
 
 ```bash
@@ -96,6 +149,21 @@ curl -X POST http://localhost:8000/getrecs \
   -d '{"getField": "package.name", "getTag": "example"}'
 ```
 
+`/getrecs` success response schema:
+
+```json
+{
+  "count": 1,
+  "records": [
+    {
+      "_id": {"$oid": "..."},
+      "package": {},
+      "stored_at": {"$date": "..."}
+    }
+  ]
+}
+```
+
 ### Download full database as JSON
 
 ```bash
@@ -103,6 +171,53 @@ curl -X GET http://localhost:8000/exportdb \
   -H "X-API-Key: <EXPORT_API_KEY>" \
   -o fastmongo-export.json
 ```
+
+## Claude Code / Codex Integration Notes
+
+Use this section when building another app that depends on `fastmongo`.
+
+### Endpoint contracts to follow
+
+- `POST /keypost`
+  - Auth header: `X-API-Key: <WRITE_API_KEY>`
+  - Body: any JSON payload to store
+  - Stored document shape: `{ package, stored_at, auth_method }`
+- `POST /getrecs`
+  - Auth header: `X-API-Key: <EXPORT_API_KEY>`
+  - Body: `{"getField":"<allowed-field>","getTag":"<value>"}`
+  - `getField` must be in `GETRECS_ALLOWED_FIELDS`
+  - Response: `{"count": <int>, "records": [...]}` (Mongo/BSON-safe JSON)
+- `GET /exportdb`
+  - Auth header: `X-API-Key: <EXPORT_API_KEY>`
+  - Returns full DB export JSON attachment
+
+### Environment required by client apps
+
+- `FASTMONGO_URL` (example: `http://localhost:8000`)
+- `WRITE_API_KEY` (for writes to `/keypost`)
+- `EXPORT_API_KEY` (for reads from `/getrecs` and exports from `/exportdb`)
+- Align `GETRECS_ALLOWED_FIELDS` with the fields your app needs to query.
+
+### Recommended dev workflow for agents
+
+1. Start fastmongo with `docker compose up --build`.
+2. Verify health with `GET /health`.
+3. Insert a fixture record via `POST /keypost`.
+4. Query it back via `POST /getrecs` using an allowed field.
+5. Run `./tests/test_api.sh` before opening PRs in dependent apps.
+
+### Common pitfalls
+
+- Using `WRITE_API_KEY` against `/getrecs` will fail (needs `EXPORT_API_KEY`).
+- Querying a field not listed in `GETRECS_ALLOWED_FIELDS` returns `400`.
+- `/post` requires JWT via `fastJWT`; use `/keypost` for API-key-based integrations.
+
+### Common status codes
+
+- `200`: Success.
+- `400`: Bad request (e.g., invalid/missing `getField` or `getTag`).
+- `401`: Missing/invalid API key or JWT.
+- `502`: JWT validation upstream (`fastJWT`) unavailable/error during `/post`.
 
 ## Notes
 
