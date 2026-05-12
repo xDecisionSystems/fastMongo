@@ -14,7 +14,7 @@ set -euo pipefail
 # 7. Creates and enables fastmongo-api systemd service
 #
 # Run as root inside the LXC:
-#   curl -fsSL https://raw.githubusercontent.com/xDecisionSystems/fastMongo/main/deploy_fastmongo_lxc.sh | bash
+#   wget -qO- https://raw.githubusercontent.com/xDecisionSystems/fastMongo/main/deploy_fastmongo_lxc.sh | bash
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run this script as root."

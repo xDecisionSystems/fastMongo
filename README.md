@@ -21,7 +21,7 @@ Deployment script:
 Run inside your Debian 13 Proxmox LXC (single command):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xDecisionSystems/fastMongo/main/deploy_fastmongo_lxc.sh | sudo bash
+wget -qO- https://raw.githubusercontent.com/xDecisionSystems/fastMongo/main/deploy_fastmongo_lxc.sh | bash
 ```
 
 What the script does:
