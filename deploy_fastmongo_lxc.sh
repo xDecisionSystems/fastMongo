@@ -57,7 +57,7 @@ download_source_archive() {
   staging_root="$(mktemp -d /tmp/fastmongo-src.XXXXXX)"
 
   echo "Downloading latest source from xDecisionSystems/fastMongo@main..."
-  curl -fsSL "${archive_url}" | tar -xzf - -C "${staging_root}"
+  wget -qO- "${archive_url}" | tar -xzf - -C "${staging_root}"
 
   SOURCE_STAGING_DIR="$(find "${staging_root}" -mindepth 1 -maxdepth 1 -type d | head -n1)"
   if [[ -z "${SOURCE_STAGING_DIR}" || ! -d "${SOURCE_STAGING_DIR}" ]]; then
@@ -82,7 +82,6 @@ install_system_packages() {
   apt-get update
   apt-get install -y --no-install-recommends \
     ca-certificates \
-    curl \
     gpg \
     lsb-release \
     openssl \
@@ -118,7 +117,7 @@ install_mongodb() {
   # Debian 13 codename is expected to be trixie.
   CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME:-trixie}")"
   install -d -m 0755 /usr/share/keyrings
-  curl -fsSL https://pgp.mongodb.com/server-8.0.asc | gpg --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
+  wget -qO- https://pgp.mongodb.com/server-8.0.asc | gpg --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
   echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/debian ${CODENAME}/mongodb-org/8.0 main" \
     >/etc/apt/sources.list.d/mongodb-org-8.0.list
 
