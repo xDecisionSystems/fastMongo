@@ -10,7 +10,7 @@ The API accepts JSON payloads, validates JWTs through `fastJWT`, stores data in 
 ## Agent quickstart checklist
 
 1. Copy `.env.example` to `.env` and set keys/passwords.
-2. Start stack: `docker compose up --build`.
+2. Start stack: `docker compose pull && docker compose up -d`.
 3. Verify API health: `curl http://localhost:8000/health`.
 4. Run smoke tests: `./tests/test_api.sh`.
 
@@ -37,6 +37,50 @@ The API accepts JSON payloads, validates JWTs through `fastJWT`, stores data in 
 A `fastJWT` service must be running and reachable from the API container (configured by `FASTJWT_URL`).
 
 ## Run
+
+`fastMongo` can run directly from Docker Hub images (no local image build required).
+
+Example `docker-compose.yml`:
+
+```yaml
+services:
+  mongo:
+    image: adclab/fastmongo-mongo:latest
+    container_name: fastmongo-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?MONGO_INITDB_ROOT_USERNAME is required}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?MONGO_INITDB_ROOT_PASSWORD is required}
+      MONGO_DB_NAME: ${MONGO_DB_NAME:?MONGO_DB_NAME is required}
+      MONGO_WRITER_PASSWORD: ${MONGO_WRITER_PASSWORD:?MONGO_WRITER_PASSWORD is required}
+      MONGO_READER_PASSWORD: ${MONGO_READER_PASSWORD:?MONGO_READER_PASSWORD is required}
+    volumes:
+      - mongo-data:/data/db
+
+  api:
+    image: adclab/fastmongo-api:latest
+    container_name: fastmongo-api
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_DB_NAME: ${MONGO_DB_NAME:?MONGO_DB_NAME is required}
+      MONGO_COLLECTION: ${MONGO_COLLECTION:?MONGO_COLLECTION is required}
+      MONGO_WRITER_USERNAME: writer
+      MONGO_WRITER_PASSWORD: ${MONGO_WRITER_PASSWORD:?MONGO_WRITER_PASSWORD is required}
+      FASTJWT_URL: ${FASTJWT_URL:?FASTJWT_URL is required}
+      FASTJWT_VALIDATE_PATH: ${FASTJWT_VALIDATE_PATH:?FASTJWT_VALIDATE_PATH is required}
+      WRITE_API_KEY: ${WRITE_API_KEY:?WRITE_API_KEY is required}
+      EXPORT_API_KEY: ${EXPORT_API_KEY:?EXPORT_API_KEY is required}
+      GETRECS_ALLOWED_FIELDS: ${GETRECS_ALLOWED_FIELDS:?GETRECS_ALLOWED_FIELDS is required}
+    ports:
+      - "8000:8000"
+
+volumes:
+  mongo-data:
+```
 
 1. Create env file:
 
@@ -71,7 +115,8 @@ GETRECS_ALLOWED_FIELDS=package.name,package.version
 3. Start:
 
 ```bash
-docker compose up --build
+docker compose pull
+docker compose up -d
 ```
 
 ## Testing scripts
@@ -200,7 +245,7 @@ Use this section when building another app that depends on `fastmongo`.
 
 ### Recommended dev workflow for agents
 
-1. Start fastmongo with `docker compose up --build`.
+1. Start fastmongo with `docker compose pull && docker compose up -d`.
 2. Verify health with `GET /health`.
 3. Insert a fixture record via `POST /keypost`.
 4. Query it back via `POST /getrecs` using an allowed field.

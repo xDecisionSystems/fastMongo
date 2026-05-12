@@ -2,8 +2,8 @@
 set -e
 
 # Set variables here
-API_VERSION="v0.7"
-MONGO_VERSION="v0.7"
+API_VERSION="v1.0"
+MONGO_VERSION="v1.0"
 API_REPO="adclab/fastmongo-api"
 MONGO_REPO="adclab/fastmongo-mongo"
 
