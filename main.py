@@ -22,7 +22,9 @@ MONGO_HOST = os.getenv("MONGO_HOST", "127.0.0.1")
 MONGO_PORT = int(os.getenv("MONGO_PORT", "27017"))
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "fastmongo")
 MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "app")
+MONGO_WRITER_USERNAME = "writer"
 MONGO_READER_USERNAME = "reader"
+MONGO_WRITER_PASSWORD = os.getenv("MONGO_WRITER_PASSWORD")
 MONGO_READER_PASSWORD = os.getenv("MONGO_READER_PASSWORD")
 
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -38,6 +40,8 @@ GETRECS_ALLOWED_FIELDS_RAW = os.getenv("GETRECS_ALLOWED_FIELDS")
 CORS_ORIGINS_RAW = os.getenv("CORS_ORIGINS", "")
 ALLOW_CORS_RAW = os.getenv("ALLOW_CORS", "true")
 
+if not MONGO_WRITER_PASSWORD:
+    raise RuntimeError("Missing required env var: MONGO_WRITER_PASSWORD")
 if not MONGO_READER_PASSWORD:
     raise RuntimeError("Missing required env var: MONGO_READER_PASSWORD")
 if not SECRET_KEY:
@@ -71,16 +75,26 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-mongo_client = MongoClient(
+mongo_reader_client = MongoClient(
     host=MONGO_HOST,
     port=MONGO_PORT,
     username=MONGO_READER_USERNAME,
     password=MONGO_READER_PASSWORD,
     authSource=MONGO_DB_NAME,
 )
-mongo_collection = mongo_client[MONGO_DB_NAME][MONGO_COLLECTION]
-allowed_payloads_collection = mongo_client[MONGO_DB_NAME]["allowed_payloads"]
-allowed_payloads_collection.create_index("type_name", unique=True)
+mongo_writer_client = MongoClient(
+    host=MONGO_HOST,
+    port=MONGO_PORT,
+    username=MONGO_WRITER_USERNAME,
+    password=MONGO_WRITER_PASSWORD,
+    authSource=MONGO_DB_NAME,
+)
+
+mongo_reader_collection = mongo_reader_client[MONGO_DB_NAME][MONGO_COLLECTION]
+mongo_writer_collection = mongo_writer_client[MONGO_DB_NAME][MONGO_COLLECTION]
+allowed_payloads_reader_collection = mongo_reader_client[MONGO_DB_NAME]["allowed_payloads"]
+allowed_payloads_writer_collection = mongo_writer_client[MONGO_DB_NAME]["allowed_payloads"]
+allowed_payloads_writer_collection.create_index("type_name", unique=True)
 
 rate_limit_lock = Lock()
 request_windows: Dict[str, Deque[float]] = defaultdict(deque)
@@ -153,7 +167,7 @@ def _validate_payload_against_allowed_schema(payload: Dict[str, Any], payload_si
         raise HTTPException(status_code=400, detail="payload must include a non-empty string field: type_name")
     type_name = type_name.strip()
 
-    rule = allowed_payloads_collection.find_one(
+    rule = allowed_payloads_reader_collection.find_one(
         {"type_name": type_name},
         {"_id": 0, "fields": 1, "max_size_bytes": 1},
     )
@@ -348,7 +362,6 @@ def save_allowed_payload(
     payload: AllowedPayloadRequest,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> AllowedPayloadResponse:
-    _require_api_key_when_cors_disabled(x_api_key)
     validate_master_api_key(x_api_key)
 
     type_name = payload.type_name.strip()
@@ -359,7 +372,7 @@ def save_allowed_payload(
     normalized_max_size = payload.max_size.strip().upper()
     max_size_bytes = _parse_max_size_to_bytes(normalized_max_size)
 
-    allowed_payloads_collection.update_one(
+    allowed_payloads_writer_collection.update_one(
         {"type_name": type_name},
         {
             "$set": {
@@ -410,7 +423,7 @@ async def store_package(
 
     now = datetime.now(timezone.utc)
 
-    result = mongo_collection.insert_one({
+    result = mongo_writer_collection.insert_one({
         "package": payload,
         "stored_at": now,
         "jwt_subject": subject,
@@ -429,7 +442,6 @@ def get_records_by_field(
     payload: Dict[str, Any],
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> Dict[str, Any]:
-    _require_api_key_when_cors_disabled(x_api_key)
     validate_read_or_master_api_key(x_api_key)
 
     get_field = payload.get("getField")
@@ -444,7 +456,7 @@ def get_records_by_field(
         raise HTTPException(status_code=400, detail="getTag must be a non-empty string")
     get_tag = get_tag.strip()
 
-    records = list(mongo_collection.find({get_field: get_tag}))
+    records = list(mongo_reader_collection.find({get_field: get_tag}))
     normalized_records = json.loads(json_util.dumps(records))
 
     return {
@@ -455,10 +467,9 @@ def get_records_by_field(
 
 @app.get("/exportdb")
 def export_database(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Response:
-    _require_api_key_when_cors_disabled(x_api_key)
     validate_master_api_key(x_api_key)
 
-    db = mongo_client[MONGO_DB_NAME]
+    db = mongo_reader_client[MONGO_DB_NAME]
     now = datetime.now(timezone.utc)
     export_payload: Dict[str, Any] = {
         "database": MONGO_DB_NAME,

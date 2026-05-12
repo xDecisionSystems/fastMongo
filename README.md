@@ -28,7 +28,7 @@ What the script does:
 - Installs MongoDB and runtime dependencies
 - Copies downloaded source into `/opt/fastmongo`
 - Creates a Python virtualenv and installs API dependencies
-- Creates MongoDB writer user and reader user (reader is used by the API runtime)
+- Creates MongoDB writer user and reader user (API runtime uses reader for reads and writer for writes)
 - Writes runtime env file to `/etc/fastmongo/fastmongo.env`
 - Creates and starts `fastmongo-api` systemd service
 
@@ -45,6 +45,7 @@ curl http://127.0.0.1:8000/health
 Use `.env.example` as your base for secrets and config values.
 
 Required values:
+- `MONGO_WRITER_PASSWORD`
 - `MONGO_READER_PASSWORD`
 - `SECRET_KEY` (32+ chars)
 - `API_WRITE_KEY`

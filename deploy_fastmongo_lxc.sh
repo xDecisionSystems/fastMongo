@@ -189,7 +189,7 @@ if (!targetDb.getUser(readerUser)) {
   targetDb.createUser({
     user: readerUser,
     pwd: readerPass,
-    roles: [{ role: "readWrite", db: dbName }]
+    roles: [{ role: "read", db: dbName }]
   });
 }
 EOF_MONGO
@@ -254,6 +254,8 @@ write_fastmongo_env() {
 # - MONGO_COLLECTION
 #
 # Not automatically safe to change (requires extra/manual work):
+# - MONGO_WRITER_PASSWORD:
+#   Must match the MongoDB 'writer' user password, or update that Mongo user too.
 # - MONGO_READER_PASSWORD:
 #   Must match the MongoDB 'reader' user password, or update that Mongo user too.
 # - MONGO_DB_NAME:
@@ -269,6 +271,7 @@ MONGO_HOST=127.0.0.1
 MONGO_PORT=27017
 MONGO_DB_NAME=${MONGO_DB_NAME}
 MONGO_COLLECTION=${MONGO_COLLECTION}
+MONGO_WRITER_PASSWORD=${MONGO_WRITER_PASSWORD}
 MONGO_READER_PASSWORD=${MONGO_READER_PASSWORD}
 SECRET_KEY=${SECRET_KEY}
 JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES}
