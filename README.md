@@ -226,6 +226,14 @@ Use this section as the strict interaction contract for automation agents.
 3. Call `POST /post` with JWT bearer or write/master key.
 4. Call `POST /getrecs` with read/master key and an allowed `getField`.
 
+## Updating
+
+Run inside the LXC as root:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/xDecisionSystems/fastMongo/main/update.sh | bash
+```
+
 ## LXC deployment
 
 Deployment script:

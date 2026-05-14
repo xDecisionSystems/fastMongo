@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION_NAME="kitten"
+VERSION_NAME="${VERSION_NAME:-unknown}"
 
 APP_DIR="/opt/fastmongo"
 APP_USER="fastmongo"
