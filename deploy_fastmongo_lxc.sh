@@ -27,7 +27,7 @@ APP_GROUP="fastmongo"
 SOURCE_STAGING_DIR=""
 MONGOD_SERVICE=""
 INSTALL_LOG="/tmp/fastmongo-install.log"
-VERSION_KEY_NAME="kitten"
+VERSION_NAME="kitten"
 
 MONGO_DB_NAME="${MONGO_DB_NAME:-fastmongo}"
 MONGO_COLLECTION="${MONGO_COLLECTION:-app}"
@@ -137,6 +137,11 @@ prepare_app_user_and_code() {
   install -d -o "${APP_USER}" -g "${APP_GROUP}" -m 0755 "${APP_DIR}"
   rsync -a --delete --exclude ".git" "${SOURCE_STAGING_DIR}/" "${APP_DIR}/"
   chown -R "${APP_USER}:${APP_GROUP}" "${APP_DIR}"
+
+  if [[ -f "${APP_DIR}/update.sh" ]]; then
+    chown root:root "${APP_DIR}/update.sh"
+    chmod 0700 "${APP_DIR}/update.sh"
+  fi
 }
 
 install_python_deps() {
@@ -345,7 +350,7 @@ EOF_SERVICE
 print_summary() {
   echo
   echo "Deployment complete."
-  echo "Version key: ${VERSION_KEY_NAME}"
+  echo "Version key: ${VERSION_NAME}"
   echo "fastMongo API service: systemctl status fastmongo-api"
   echo "MongoDB service:       systemctl status ${MONGOD_SERVICE}"
   echo
@@ -356,7 +361,7 @@ print_summary() {
   echo "API expected on: http://${API_BIND_HOST}:${API_BIND_PORT}"
 }
 
-echo "Version key: ${VERSION_KEY_NAME}"
+echo "Version key: ${VERSION_NAME}"
 step "Downloading source files"
 download_source_archive
 step "Installing required packages"

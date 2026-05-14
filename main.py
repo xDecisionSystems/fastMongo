@@ -2,6 +2,7 @@ import os
 import secrets
 import json
 import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Deque, Dict, Literal, Optional
 from collections import defaultdict, deque
@@ -15,7 +16,14 @@ from fastapi.responses import Response
 from bson import json_util
 from pymongo import MongoClient
 
-app = FastAPI(title="fastMongo API", version="1.0.0")
+VERSION_NAME = "kitten"
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    print(f"fastMongo starting — version: {VERSION_NAME}", flush=True)
+    yield
+
+app = FastAPI(title="fastMongo API", version="1.0.0", lifespan=lifespan)
 
 
 MONGO_HOST = os.getenv("MONGO_HOST", "127.0.0.1")
