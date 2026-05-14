@@ -16,7 +16,7 @@ from fastapi.responses import Response
 from bson import json_util
 from pymongo import MongoClient
 
-VERSION_NAME = "winky"
+VERSION_NAME = "chips"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -403,6 +403,63 @@ def save_allowed_payload(
     )
 
 
+@app.get("/allowed")
+def list_allowed_types(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> Dict[str, Any]:
+    validate_master_api_key(x_api_key)
+
+    types = list(allowed_payloads_reader_collection.find({}, {"_id": 0}))
+    normalized = json.loads(json_util.dumps(types))
+
+    return {
+        "count": len(normalized),
+        "types": normalized,
+    }
+
+
+@app.delete("/allowed/{type_name}")
+def delete_allowed_type(
+    type_name: str,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> Dict[str, Any]:
+    validate_master_api_key(x_api_key)
+
+    result = allowed_payloads_writer_collection.delete_one({"type_name": type_name})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail=f"type '{type_name}' not found")
+
+    return {"status": "deleted", "type_name": type_name}
+
+
+@app.delete("/records/{type_name}")
+def delete_records_by_type(
+    type_name: str,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> Dict[str, Any]:
+    validate_master_api_key(x_api_key)
+
+    result = mongo_writer_collection.delete_many({"type_name": type_name})
+
+    return {"status": "deleted", "type_name": type_name, "deleted_count": result.deleted_count}
+
+
+@app.delete("/hardreset")
+def hard_reset(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> Dict[str, Any]:
+    validate_master_api_key(x_api_key)
+
+    records_result = mongo_writer_collection.delete_many({})
+    types_result = allowed_payloads_writer_collection.delete_many({})
+
+    return {
+        "status": "reset",
+        "records_deleted": records_result.deleted_count,
+        "types_deleted": types_result.deleted_count,
+    }
+
+
 @app.post("/post")
 async def store_package(
     payload: Dict[str, Any],
@@ -474,6 +531,29 @@ def get_records_by_field(
         query[get_field] = get_tag.strip()
 
     records = list(mongo_reader_collection.find(query))
+    normalized_records = json.loads(json_util.dumps(records))
+
+    return {
+        "count": len(normalized_records),
+        "records": normalized_records,
+    }
+
+
+@app.get("/lastrecs")
+def get_last_records(
+    type_name: str,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> Dict[str, Any]:
+    validate_read_or_master_api_key(x_api_key)
+
+    if not type_name.strip():
+        raise HTTPException(status_code=400, detail="type_name must be a non-empty string")
+    type_name = type_name.strip()
+
+    if type_name not in GETRECS_ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="type_name is not in the allowed list")
+
+    records = list(mongo_reader_collection.find({"type_name": type_name}).sort("stored_at", -1).limit(10))
     normalized_records = json.loads(json_util.dumps(records))
 
     return {

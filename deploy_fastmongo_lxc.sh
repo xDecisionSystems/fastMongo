@@ -27,7 +27,7 @@ APP_GROUP="fastmongo"
 SOURCE_STAGING_DIR=""
 MONGOD_SERVICE=""
 INSTALL_LOG="/tmp/fastmongo-install.log"
-VERSION_NAME="winky"
+VERSION_NAME="chips"
 
 MONGO_DB_NAME="${MONGO_DB_NAME:-fastmongo}"
 MONGO_COLLECTION="${MONGO_COLLECTION:-app}"

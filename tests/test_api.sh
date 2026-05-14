@@ -171,4 +171,110 @@ if [[ "${getrecs_field_code}" != "200" ]]; then
   exit 1
 fi
 
+echo "7) lastrecs test..."
+lastrecs_code="$(curl -s -o /tmp/fastmongo_lastrecs.json -w "%{http_code}" \
+  -G "${API_URL}/lastrecs" \
+  --data-urlencode "type_name=${ALLOWED_TYPE}" \
+  -H "X-API-Key: ${API_READ_KEY_VALUE}")"
+
+if [[ "${lastrecs_code}" != "200" ]]; then
+  echo "lastrecs failed (HTTP ${lastrecs_code})"
+  cat /tmp/fastmongo_lastrecs.json
+  exit 1
+fi
+
+lastrecs_count="$(python3 - <<'PY'
+import json
+with open('/tmp/fastmongo_lastrecs.json', 'r', encoding='utf-8') as f:
+    data = json.load(f)
+print(int(data.get("count", 0)))
+PY
+)"
+
+if [[ "${lastrecs_count}" -lt 1 ]]; then
+  echo "lastrecs returned zero records unexpectedly."
+  cat /tmp/fastmongo_lastrecs.json
+  exit 1
+fi
+
+python3 - <<'PY'
+import json
+with open('/tmp/fastmongo_lastrecs.json', 'r', encoding='utf-8') as f:
+    data = json.load(f)
+print(f"  {data['count']} record(s):")
+for rec in data['records']:
+    print(json.dumps(rec, indent=2))
+PY
+
+echo "8) list allowed types test..."
+list_allowed_code="$(curl -s -o /tmp/fastmongo_allowed_list.json -w "%{http_code}" \
+  -X GET "${API_URL}/allowed" \
+  -H "X-API-Key: ${API_MASTER_KEY_VALUE}")"
+
+if [[ "${list_allowed_code}" != "200" ]]; then
+  echo "list allowed types failed (HTTP ${list_allowed_code})"
+  cat /tmp/fastmongo_allowed_list.json
+  exit 1
+fi
+
+python3 - <<'PY'
+import json
+with open('/tmp/fastmongo_allowed_list.json', 'r', encoding='utf-8') as f:
+    data = json.load(f)
+print(f"  {data['count']} allowed type(s):")
+for t in data['types']:
+    print(json.dumps(t, indent=2))
+PY
+
+echo "9) delete all records of type test..."
+delete_records_code="$(curl -s -o /tmp/fastmongo_records_delete.json -w "%{http_code}" \
+  -X DELETE "${API_URL}/records/${ALLOWED_TYPE}" \
+  -H "X-API-Key: ${API_MASTER_KEY_VALUE}")"
+
+if [[ "${delete_records_code}" != "200" ]]; then
+  echo "delete records failed (HTTP ${delete_records_code})"
+  cat /tmp/fastmongo_records_delete.json
+  exit 1
+fi
+
+python3 - <<'PY'
+import json
+with open('/tmp/fastmongo_records_delete.json', 'r', encoding='utf-8') as f:
+    print(f"  {json.dumps(json.load(f))}")
+PY
+
+echo "10) delete allowed type test..."
+delete_allowed_code="$(curl -s -o /tmp/fastmongo_allowed_delete.json -w "%{http_code}" \
+  -X DELETE "${API_URL}/allowed/${ALLOWED_TYPE}" \
+  -H "X-API-Key: ${API_MASTER_KEY_VALUE}")"
+
+if [[ "${delete_allowed_code}" != "200" ]]; then
+  echo "delete allowed type failed (HTTP ${delete_allowed_code})"
+  cat /tmp/fastmongo_allowed_delete.json
+  exit 1
+fi
+
+python3 - <<'PY'
+import json
+with open('/tmp/fastmongo_allowed_delete.json', 'r', encoding='utf-8') as f:
+    print(f"  {json.dumps(json.load(f))}")
+PY
+
+echo "11) hardreset test..."
+hardreset_code="$(curl -s -o /tmp/fastmongo_hardreset.json -w "%{http_code}" \
+  -X DELETE "${API_URL}/hardreset" \
+  -H "X-API-Key: ${API_MASTER_KEY_VALUE}")"
+
+if [[ "${hardreset_code}" != "200" ]]; then
+  echo "hardreset failed (HTTP ${hardreset_code})"
+  cat /tmp/fastmongo_hardreset.json
+  exit 1
+fi
+
+python3 - <<'PY'
+import json
+with open('/tmp/fastmongo_hardreset.json', 'r', encoding='utf-8') as f:
+    print(f"  {json.dumps(json.load(f))}")
+PY
+
 echo "API smoke tests passed."
