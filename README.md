@@ -172,7 +172,7 @@ Use this section as the strict interaction contract for automation agents.
 - `429` rate limit exceeded.
 
 - Stored Mongo document shape:
-- `package`: original payload.
+- All payload fields stored at the document root.
 - `stored_at`: UTC timestamp.
 - `jwt_subject`: JWT subject when JWT auth used, otherwise `null`.
 - `auth_method`: `jwt` or `api_key`.

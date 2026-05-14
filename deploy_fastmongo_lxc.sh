@@ -27,7 +27,7 @@ APP_GROUP="fastmongo"
 SOURCE_STAGING_DIR=""
 MONGOD_SERVICE=""
 INSTALL_LOG="/tmp/fastmongo-install.log"
-VERSION_NAME="kitten"
+VERSION_NAME="winky"
 
 MONGO_DB_NAME="${MONGO_DB_NAME:-fastmongo}"
 MONGO_COLLECTION="${MONGO_COLLECTION:-app}"
@@ -45,7 +45,7 @@ API_WRITE_KEY="${API_WRITE_KEY:-$(openssl rand -hex 32)}"
 API_READ_KEY="${API_READ_KEY:-$(openssl rand -hex 32)}"
 API_MASTER_KEY="${API_MASTER_KEY:-$(openssl rand -hex 32)}"
 CORS_ORIGINS="${CORS_ORIGINS:-}"
-GETRECS_ALLOWED_FIELDS="${GETRECS_ALLOWED_FIELDS:-app.name,app.version}"
+GETRECS_ALLOWED_TYPES="${GETRECS_ALLOWED_TYPES:-}"
 API_BIND_HOST="${API_BIND_HOST:-0.0.0.0}"
 API_BIND_PORT="${API_BIND_PORT:-8000}"
 
@@ -273,7 +273,7 @@ write_fastmongo_env() {
 # - API_READ_KEY
 # - API_MASTER_KEY
 # - CORS_ORIGINS
-# - GETRECS_ALLOWED_FIELDS
+# - GETRECS_ALLOWED_TYPES
 # - MONGO_COLLECTION
 #
 # Not automatically safe to change (requires extra/manual work):
@@ -306,7 +306,7 @@ API_WRITE_KEY=${API_WRITE_KEY}
 API_READ_KEY=${API_READ_KEY}
 API_MASTER_KEY=${API_MASTER_KEY}
 CORS_ORIGINS=${CORS_ORIGINS}
-GETRECS_ALLOWED_FIELDS=${GETRECS_ALLOWED_FIELDS}
+GETRECS_ALLOWED_TYPES=${GETRECS_ALLOWED_TYPES}
 EOF_ENV
   chown root:"${APP_GROUP}" /etc/fastmongo/fastmongo.env
   chmod 0640 /etc/fastmongo/fastmongo.env

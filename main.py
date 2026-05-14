@@ -16,7 +16,7 @@ from fastapi.responses import Response
 from bson import json_util
 from pymongo import MongoClient
 
-VERSION_NAME = "kitten"
+VERSION_NAME = "winky"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -44,7 +44,7 @@ RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 API_WRITE_KEY = os.getenv("API_WRITE_KEY")
 API_READ_KEY = os.getenv("API_READ_KEY")
 API_MASTER_KEY = os.getenv("API_MASTER_KEY")
-GETRECS_ALLOWED_FIELDS_RAW = os.getenv("GETRECS_ALLOWED_FIELDS")
+GETRECS_ALLOWED_TYPES_RAW = os.getenv("GETRECS_ALLOWED_TYPES")
 CORS_ORIGINS_RAW = os.getenv("CORS_ORIGINS", "")
 ALLOW_CORS_RAW = os.getenv("ALLOW_CORS", "true")
 
@@ -62,16 +62,16 @@ if not API_READ_KEY:
     raise RuntimeError("Missing required env var: API_READ_KEY")
 if not API_MASTER_KEY:
     raise RuntimeError("Missing required env var: API_MASTER_KEY")
-if not GETRECS_ALLOWED_FIELDS_RAW:
-    raise RuntimeError("Missing required env var: GETRECS_ALLOWED_FIELDS")
+if not GETRECS_ALLOWED_TYPES_RAW:
+    raise RuntimeError("Missing required env var: GETRECS_ALLOWED_TYPES")
 
-GETRECS_ALLOWED_FIELDS = {
-    field.strip()
-    for field in GETRECS_ALLOWED_FIELDS_RAW.split(",")
-    if field.strip()
+GETRECS_ALLOWED_TYPES = {
+    t.strip()
+    for t in GETRECS_ALLOWED_TYPES_RAW.split(",")
+    if t.strip()
 }
-if not GETRECS_ALLOWED_FIELDS:
-    raise RuntimeError("GETRECS_ALLOWED_FIELDS must include at least one field name")
+if not GETRECS_ALLOWED_TYPES:
+    raise RuntimeError("GETRECS_ALLOWED_TYPES must include at least one type name")
 
 CORS_ORIGINS = [o.strip() for o in CORS_ORIGINS_RAW.split(",") if o.strip()]
 ALLOW_CORS = ALLOW_CORS_RAW.strip().lower() in {"1", "true", "yes", "on"}
@@ -432,7 +432,7 @@ async def store_package(
     now = datetime.now(timezone.utc)
 
     result = mongo_writer_collection.insert_one({
-        "package": payload,
+        **payload,
         "stored_at": now,
         "jwt_subject": subject,
         "auth_method": auth_method,
@@ -452,19 +452,28 @@ def get_records_by_field(
 ) -> Dict[str, Any]:
     validate_read_or_master_api_key(x_api_key)
 
+    type_name = payload.get("type_name")
     get_field = payload.get("getField")
     get_tag = payload.get("getTag")
 
-    if not isinstance(get_field, str) or not get_field.strip():
-        raise HTTPException(status_code=400, detail="getField must be a non-empty string")
-    get_field = get_field.strip()
-    if get_field not in GETRECS_ALLOWED_FIELDS:
-        raise HTTPException(status_code=400, detail="getField is not in the allowed list")
-    if not isinstance(get_tag, str) or not get_tag.strip():
-        raise HTTPException(status_code=400, detail="getTag must be a non-empty string")
-    get_tag = get_tag.strip()
+    if not isinstance(type_name, str) or not type_name.strip():
+        raise HTTPException(status_code=400, detail="type_name must be a non-empty string")
+    type_name = type_name.strip()
 
-    records = list(mongo_reader_collection.find({get_field: get_tag}))
+    if type_name not in GETRECS_ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="type_name is not in the allowed list")
+
+    query: Dict[str, Any] = {"type_name": type_name}
+
+    if get_field is not None or get_tag is not None:
+        if not isinstance(get_field, str) or not get_field.strip():
+            raise HTTPException(status_code=400, detail="getField must be a non-empty string")
+        get_field = get_field.strip()
+        if not isinstance(get_tag, str) or not get_tag.strip():
+            raise HTTPException(status_code=400, detail="getTag must be a non-empty string")
+        query[get_field] = get_tag.strip()
+
+    records = list(mongo_reader_collection.find(query))
     normalized_records = json.loads(json_util.dumps(records))
 
     return {

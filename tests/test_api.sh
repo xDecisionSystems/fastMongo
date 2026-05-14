@@ -2,14 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
 
-if [[ -f "${ENV_FILE}" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "${ENV_FILE}"
-  set +a
-fi
+for ENV_FILE in "${ROOT_DIR}/.env.test" "${ROOT_DIR}/.env"; do
+  if [[ -f "${ENV_FILE}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}"
+    set +a
+    break
+  fi
+done
 
 API_URL="${API_URL:-http://localhost:8000}"
 API_WRITE_KEY_VALUE="${API_WRITE_KEY:-}"
@@ -45,7 +47,7 @@ fi
 
 echo "2) configure allowed payload type..."
 allowed_payload="$(cat <<EOF
-{"type_name":"${ALLOWED_TYPE}","fields":["version","metadata"],"max_size":"64KB"}
+{"type_name":"${ALLOWED_TYPE}","fields":["name","version"],"max_size":"64KB"}
 EOF
 )"
 allowed_code="$(curl -s -o /tmp/fastmongo_allowed.json -w "%{http_code}" \
@@ -89,7 +91,7 @@ if [[ -z "${jwt_token}" ]]; then
 fi
 
 post_payload="$(cat <<EOF
-{"type_name":"${ALLOWED_TYPE}","version":1,"metadata":{"owner":"test-script-${TEST_TAG}"}}
+{"type_name":"${ALLOWED_TYPE}","name":"${GET_TAG}","version":"${TEST_TAG}"}
 EOF
 )"
 post_code="$(curl -s -o /tmp/fastmongo_post.json -w "%{http_code}" \
@@ -106,7 +108,7 @@ fi
 
 echo "4) /post with API key test..."
 apikey_post_payload="$(cat <<EOF
-{"type_name":"${ALLOWED_TYPE}","version":1,"metadata":{"owner":"test-script-${TEST_TAG}"}}
+{"type_name":"${ALLOWED_TYPE}","name":"${GET_TAG}","version":"${TEST_TAG}"}
 EOF
 )"
 apikey_post_code="$(curl -s -o /tmp/fastmongo_post_apikey.json -w "%{http_code}" \
@@ -121,9 +123,9 @@ if [[ "${apikey_post_code}" != "200" ]]; then
   exit 1
 fi
 
-echo "5) getrecs read test..."
+echo "5) getrecs by type_name test..."
 getrecs_payload="$(cat <<EOF
-{"getField":"${GET_FIELD}","getTag":"${GET_TAG}"}
+{"type_name":"${ALLOWED_TYPE}"}
 EOF
 )"
 getrecs_code="$(curl -s -o /tmp/fastmongo_getrecs.json -w "%{http_code}" \
@@ -149,6 +151,23 @@ PY
 if [[ "${record_count}" -lt 1 ]]; then
   echo "getrecs returned zero records unexpectedly."
   cat /tmp/fastmongo_getrecs.json
+  exit 1
+fi
+
+echo "6) getrecs by type_name + field test..."
+getrecs_field_payload="$(cat <<EOF
+{"type_name":"${ALLOWED_TYPE}","getField":"name","getTag":"${GET_TAG}"}
+EOF
+)"
+getrecs_field_code="$(curl -s -o /tmp/fastmongo_getrecs_field.json -w "%{http_code}" \
+  -X POST "${API_URL}/getrecs" \
+  -H "X-API-Key: ${API_READ_KEY_VALUE}" \
+  -H "Content-Type: application/json" \
+  -d "${getrecs_field_payload}")"
+
+if [[ "${getrecs_field_code}" != "200" ]]; then
+  echo "getrecs by field failed (HTTP ${getrecs_field_code})"
+  cat /tmp/fastmongo_getrecs_field.json
   exit 1
 fi
 
