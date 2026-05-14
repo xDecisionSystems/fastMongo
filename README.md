@@ -4,13 +4,18 @@
 
 ## What it provides
 
-- `POST /generate-token`: mint JWTs (requires `API_WRITE_KEY` or `API_MASTER_KEY`, or allowed browser `Origin`)
-- `POST /validate-token`: validate JWTs (`API_WRITE_KEY` or `API_MASTER_KEY` required)
-- `POST /allowed`: define allowed payload types/fields/max size for `/post` (`API_MASTER_KEY` required)
-- `POST /post`: store a payload (JWT via `Authorization: Bearer` or API key via `X-API-Key: API_WRITE_KEY` or `API_MASTER_KEY`)
-- `POST /getrecs`: query records by allowed field using `API_READ_KEY` or `API_MASTER_KEY`
-- `GET /exportdb`: export full DB using `API_MASTER_KEY`
 - `GET /health`: health check
+- `POST /generate-token`: mint JWTs (`API_WRITE_KEY` or `API_MASTER_KEY` required, or allowed browser `Origin`)
+- `POST /validate-token`: validate JWTs (`API_WRITE_KEY` or `API_MASTER_KEY` required)
+- `POST /allowed`: define allowed payload types/fields/max size (`API_MASTER_KEY` required)
+- `GET /allowed`: list all allowed types (`API_MASTER_KEY` required)
+- `DELETE /allowed/{type_name}`: delete an allowed type definition (`API_MASTER_KEY` required)
+- `POST /post`: store a payload (`API_WRITE_KEY`, `API_MASTER_KEY`, or JWT bearer)
+- `POST /getrecs`: query records by type and optional field (`API_READ_KEY` or `API_MASTER_KEY`)
+- `GET /lastrecs`: get last 10 records of a type (`API_READ_KEY` or `API_MASTER_KEY`)
+- `DELETE /records/{type_name}`: delete all records of a type (`API_MASTER_KEY` required)
+- `DELETE /hardreset`: delete all records and all allowed types (`API_MASTER_KEY` required)
+- `GET /exportdb`: export full DB (`API_MASTER_KEY` required)
 
 ## Agent endpoint contract (Claude/Codex-safe)
 
@@ -22,23 +27,29 @@ Use this section as the strict interaction contract for automation agents.
 - Always send `Content-Type: application/json` for `POST` endpoints.
 - API key header name is exactly: `X-API-Key`.
 - JWT auth header is exactly: `Authorization: Bearer <token>`.
-- If `ALLOW_CORS=false`, `/health`, `/generate-token`, and `/post` require a valid API key even when they might otherwise allow browser-origin access.
+- Payloads are stored flat at the document root — fields declared in `/allowed` are top-level keys alongside `type_name`.
+- `GETRECS_ALLOWED_TYPES` controls which `type_name` values can be queried via `/getrecs` and `/lastrecs`.
 
 ### Required auth per endpoint
 
-- `GET /health`: no key required unless `ALLOW_CORS=false`.
-- `POST /generate-token`: `X-API-Key` with write/master key, or browser `Origin` in `CORS_ORIGINS`.
-- `POST /validate-token`: write key or master key.
+- `GET /health`: no key required.
+- `POST /generate-token`: write or master key, or browser `Origin` in `CORS_ORIGINS`.
+- `POST /validate-token`: write or master key.
 - `POST /allowed`: master key only.
-- `POST /post`: write key/master key OR valid JWT bearer token.
-- `POST /getrecs`: read key or master key.
+- `GET /allowed`: master key only.
+- `DELETE /allowed/{type_name}`: master key only.
+- `POST /post`: write/master key OR valid JWT bearer token.
+- `POST /getrecs`: read or master key.
+- `GET /lastrecs`: read or master key.
+- `DELETE /records/{type_name}`: master key only.
+- `DELETE /hardreset`: master key only.
 - `GET /exportdb`: master key only.
 
 ### Endpoint details (request/response contract)
 
 #### `GET /health`
 
-- Auth: no key required unless `ALLOW_CORS=false`; then any valid API key is required.
+- Auth: none required.
 - Success `200`:
 
 ```json
@@ -47,9 +58,11 @@ Use this section as the strict interaction contract for automation agents.
 }
 ```
 
+---
+
 #### `POST /generate-token`
 
-- Auth: `X-API-Key` with write/master key, or allowed browser `Origin`.
+- Auth: write or master key, or allowed browser `Origin`.
 - Request body:
 
 ```json
@@ -68,12 +81,14 @@ Use this section as the strict interaction contract for automation agents.
 ```
 
 - Common failures:
-- `401` missing/invalid credentials.
-- `422` invalid request body (missing or invalid `sub`).
+  - `401` missing/invalid credentials.
+  - `422` missing or invalid `sub`.
+
+---
 
 #### `POST /validate-token`
 
-- Auth: write key or master key.
+- Auth: write or master key.
 - Request body:
 
 ```json
@@ -93,65 +108,102 @@ Use this section as the strict interaction contract for automation agents.
 ```
 
 - Notes:
-- `status` is one of `valid`, `expired`, `invalid`.
-- `expires_at` and `subject` are `null` when token is not valid.
+  - `status` is one of `valid`, `expired`, `invalid`.
+  - `expires_at` and `subject` are `null` when token is not valid.
 
-#### `POST /allowed` (authoritative schema gate for `/post`)
+---
+
+#### `POST /allowed`
 
 - Auth: master key only.
-- Purpose: define or update allowed schema per `type_name`.
+- Purpose: define or update the allowed schema for a `type_name`. Must be called before posting data of that type.
 - Request body:
 
 ```json
 {
-  "type_name": "example",
-  "fields": ["version", "metadata"],
+  "type_name": "my_type",
+  "fields": ["field1", "field2"],
   "max_size": "64KB"
 }
 ```
 
 - Validation rules:
-- `type_name` must be non-empty after trimming.
-- `fields` must include at least one non-empty field name.
-- Duplicate `fields` are deduplicated in order.
-- `max_size` must match `<integer><KB|MB>` (example: `64KB`, `2MB`).
-- Upsert behavior by `type_name`.
+  - `type_name` must be non-empty.
+  - `fields` must include at least one non-empty field name. Duplicates are deduplicated.
+  - `max_size` must match `<integer><KB|MB>` (e.g. `64KB`, `2MB`).
+  - Upserts by `type_name`.
 
 - Success `200`:
 
 ```json
 {
   "status": "saved",
-  "type_name": "example",
-  "fields": ["version", "metadata"],
+  "type_name": "my_type",
+  "fields": ["field1", "field2"],
   "max_size": "64KB",
   "max_size_bytes": 65536
 }
 ```
 
 - Common failures:
-- `401` missing/invalid master key.
-- `400` invalid `type_name`, `fields`, or `max_size`.
+  - `401` missing/invalid master key.
+  - `400` invalid `type_name`, `fields`, or `max_size`.
 
-#### `POST /post`
+---
 
-- Auth: write/master API key OR JWT bearer token.
-- Request body: any JSON object that passes `/allowed` rule for its `type_name`.
-- Required `/allowed -> /post` workflow:
-1. Call `POST /allowed` for each `type_name` before storing payloads of that type.
-2. `POST /post` payload must include `type_name`.
-3. Payload keys may only include `type_name` and fields declared in `/allowed`.
-4. Raw request size must be `<= max_size_bytes` for that `type_name`.
+#### `GET /allowed`
 
-- Example accepted body:
+- Auth: master key only.
+- Success `200`:
 
 ```json
 {
-  "type_name": "example",
-  "version": 1,
-  "metadata": {
-    "owner": "team-a"
-  }
+  "count": 1,
+  "types": [
+    {
+      "type_name": "my_type",
+      "fields": ["field1", "field2"],
+      "max_size": "64KB",
+      "max_size_bytes": 65536,
+      "updated_at": "2026-05-14T12:00:00+00:00"
+    }
+  ]
+}
+```
+
+---
+
+#### `DELETE /allowed/{type_name}`
+
+- Auth: master key only.
+- Deletes the allowed type definition. Does not delete stored records of that type.
+- Success `200`:
+
+```json
+{
+  "status": "deleted",
+  "type_name": "my_type"
+}
+```
+
+- Common failures:
+  - `401` missing/invalid master key.
+  - `404` type not found.
+
+---
+
+#### `POST /post`
+
+- Auth: write/master key OR JWT bearer token.
+- Required workflow: call `POST /allowed` for the `type_name` before posting.
+- Payload fields are stored flat at the document root alongside `type_name`.
+- Request body must include `type_name` and only fields declared in `/allowed`:
+
+```json
+{
+  "type_name": "my_type",
+  "field1": "value",
+  "field2": "value"
 }
 ```
 
@@ -166,65 +218,147 @@ Use this section as the strict interaction contract for automation agents.
 ```
 
 - Common failures:
-- `400` missing/invalid `type_name`, disallowed payload type, or unexpected fields.
-- `401` invalid API key or JWT.
-- `413` payload exceeds configured max size.
-- `429` rate limit exceeded.
+  - `400` missing/invalid `type_name`, undeclared type, or unexpected fields.
+  - `401` invalid API key or JWT.
+  - `413` payload exceeds configured max size.
+  - `429` rate limit exceeded.
 
-- Stored Mongo document shape:
-- All payload fields stored at the document root.
-- `stored_at`: UTC timestamp.
-- `jwt_subject`: JWT subject when JWT auth used, otherwise `null`.
-- `auth_method`: `jwt` or `api_key`.
-
-#### `POST /getrecs`
-
-- Auth: read key or master key.
-- Request body:
+- Stored MongoDB document shape:
 
 ```json
 {
-  "getField": "package.type_name",
-  "getTag": "example"
+  "_id": "<object_id>",
+  "type_name": "my_type",
+  "field1": "value",
+  "field2": "value",
+  "stored_at": "<utc_timestamp>",
+  "jwt_subject": "<subject_or_null>",
+  "auth_method": "jwt | api_key"
 }
 ```
 
-- Validation rules:
-- `getField` must be a non-empty string and must exist in env var `GETRECS_ALLOWED_FIELDS`.
-- `getTag` must be a non-empty string.
+---
+
+#### `POST /getrecs`
+
+- Auth: read or master key.
+- `type_name` must be in `GETRECS_ALLOWED_TYPES` env var.
+- Query all records of a type:
+
+```json
+{
+  "type_name": "my_type"
+}
+```
+
+- Query records of a type filtered by a field value:
+
+```json
+{
+  "type_name": "my_type",
+  "getField": "field1",
+  "getTag": "value"
+}
+```
 
 - Success `200`:
 
 ```json
 {
-  "count": 1,
-  "records": [
-    {}
-  ]
+  "count": 2,
+  "records": [{}]
 }
 ```
 
 - Common failures:
-- `401` invalid read/master key.
-- `400` invalid `getField`/`getTag`, or `getField` not allowlisted.
+  - `401` invalid read/master key.
+  - `400` `type_name` not in `GETRECS_ALLOWED_TYPES`, or invalid `getField`/`getTag`.
+
+---
+
+#### `GET /lastrecs`
+
+- Auth: read or master key.
+- `type_name` must be in `GETRECS_ALLOWED_TYPES` env var.
+- Query parameter: `type_name`
+- Returns the 10 most recent records sorted by `stored_at` descending.
+
+```
+GET /lastrecs?type_name=my_type
+```
+
+- Success `200`:
+
+```json
+{
+  "count": 10,
+  "records": [{}]
+}
+```
+
+- Common failures:
+  - `401` invalid read/master key.
+  - `400` `type_name` not in `GETRECS_ALLOWED_TYPES`.
+
+---
+
+#### `DELETE /records/{type_name}`
+
+- Auth: master key only.
+- Deletes all stored records of the specified type.
+- Success `200`:
+
+```json
+{
+  "status": "deleted",
+  "type_name": "my_type",
+  "deleted_count": 42
+}
+```
+
+- Common failures:
+  - `401` missing/invalid master key.
+
+---
+
+#### `DELETE /hardreset`
+
+- Auth: master key only.
+- Deletes all stored records AND all allowed type definitions.
+- Success `200`:
+
+```json
+{
+  "status": "reset",
+  "records_deleted": 42,
+  "types_deleted": 3
+}
+```
+
+- Common failures:
+  - `401` missing/invalid master key.
+
+---
 
 #### `GET /exportdb`
 
 - Auth: master key only.
 - Success `200`: JSON file attachment containing:
-- `database`
-- `exported_at`
-- `collections` object with all collection data.
+  - `database`
+  - `exported_at`
+  - `collections` object with all collection data.
 
 - Common failures:
-- `401` missing/invalid master key.
+  - `401` missing/invalid master key.
+
+---
 
 ### Minimal machine flow for agents
 
-1. Call `POST /allowed` with master key.
-2. Call `POST /generate-token` with write key (optional if using API key auth for `/post`).
-3. Call `POST /post` with JWT bearer or write/master key.
-4. Call `POST /getrecs` with read/master key and an allowed `getField`.
+1. Call `POST /allowed` with master key to declare a `type_name` and its fields.
+2. Call `POST /post` with write/master key or JWT to store records.
+3. Call `POST /getrecs` or `GET /lastrecs` with read/master key to retrieve records.
+4. Call `DELETE /records/{type_name}` or `DELETE /hardreset` to clean up.
 
 ## Updating
 
@@ -236,10 +370,7 @@ wget -qO- https://raw.githubusercontent.com/xDecisionSystems/fastMongo/main/upda
 
 ## LXC deployment
 
-Deployment script:
-- `deploy_fastmongo_lxc.sh`
-
-Run inside your Debian 13 Proxmox LXC (single command):
+Run inside your Debian 13 Proxmox LXC as root:
 
 ```bash
 wget -qO- https://raw.githubusercontent.com/xDecisionSystems/fastMongo/main/deploy_fastmongo_lxc.sh | bash
@@ -248,10 +379,10 @@ wget -qO- https://raw.githubusercontent.com/xDecisionSystems/fastMongo/main/depl
 What the script does:
 - Downloads fastMongo source files from GitHub
 - Installs MongoDB and runtime dependencies
-- Copies downloaded source into `/opt/fastmongo`
+- Copies source into `/opt/fastmongo`
 - Creates a Python virtualenv and installs API dependencies
-- Creates MongoDB writer user and reader user (API runtime uses reader for reads and writer for writes)
-- Writes runtime env file to `/etc/fastmongo/fastmongo.env`
+- Creates MongoDB writer and reader users
+- Writes runtime env to `/etc/fastmongo/fastmongo.env`
 - Creates and starts `fastmongo-api` systemd service
 
 Verify:
@@ -264,7 +395,7 @@ curl http://127.0.0.1:8000/health
 
 ## Runtime configuration
 
-Use `.env.example` as your base for secrets and config values.
+File: `/etc/fastmongo/fastmongo.env`
 
 Required values:
 - `MONGO_WRITER_PASSWORD`
@@ -273,101 +404,97 @@ Required values:
 - `API_WRITE_KEY`
 - `API_READ_KEY`
 - `API_MASTER_KEY`
-- `GETRECS_ALLOWED_FIELDS`
+- `GETRECS_ALLOWED_TYPES` — comma-separated list of `type_name` values that can be queried (e.g. `my_type,other_type`)
 
 Common optional values:
 - `MONGO_HOST` (default: `127.0.0.1`)
 - `MONGO_PORT` (default: `27017`)
 - `MONGO_DB_NAME` (default: `fastmongo`)
 - `MONGO_COLLECTION` (default: `app`)
-- `JWT_EXPIRATION_MINUTES` (default: `30`)
+- `JWT_EXPIRATION_MINUTES` (default: `20`)
 - `JWT_ISSUER` (default: `fastjwt-api`)
 - `JWT_AUDIENCE` (default: `fastjwt-clients`)
 - `RATE_LIMIT_REQUESTS` (default: `60`, `0` disables)
 - `RATE_LIMIT_WINDOW_SECONDS` (default: `60`)
 - `CORS_ORIGINS` (optional browser allowlist for `/generate-token`)
-- `API_URL` (test script only — not read by the service; default: `http://localhost:8000`)
-
-`GETRECS_ALLOWED_FIELDS` must contain Mongo dotted field paths that exist in stored documents.
-`/post` stores payloads under the `package` key (for example `package.type_name`).
 
 ## API examples
 
-Generate a token:
+Store a record:
 
 ```bash
-curl -X POST http://localhost:8000/generate-token \
-  -H "X-API-Key: <API_WRITE_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{"sub":"user-123"}'
-```
-
-Store with JWT (`/post`):
-
-```bash
-# First define allowed payload type/fields/max size:
+# 1. Define the allowed type:
 curl -X POST http://localhost:8000/allowed \
   -H "X-API-Key: <API_MASTER_KEY>" \
   -H "Content-Type: application/json" \
-  -d '{"type_name":"example","fields":["version","metadata"],"max_size":"64KB"}'
+  -d '{"type_name":"my_type","fields":["field1","field2"],"max_size":"64KB"}'
 
-# Then upload payload using only allowed fields (fields are optional; extra fields are rejected):
-curl -X POST http://localhost:8000/post \
-  -H "Authorization: Bearer <jwt-from-generate-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"type_name":"example","version":1,"metadata":{"owner":"team-a"}}'
-```
-
-Store with API key or MASTER API key (`/post`):
-
-```bash
+# 2. Post a record:
 curl -X POST http://localhost:8000/post \
   -H "X-API-Key: <API_WRITE_KEY>" \
   -H "Content-Type: application/json" \
-  -d '{"type_name":"example","version":1,"metadata":{"owner":"team-a"}}'
-```
-
-Validate a token:
-
-```bash
-curl -X POST http://localhost:8000/validate-token \
-  -H "X-API-Key: <API_WRITE_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{"jwt":"<token>"}'
+  -d '{"type_name":"my_type","field1":"hello","field2":"world"}'
 ```
 
 Query records:
 
 ```bash
+# All records of a type:
 curl -X POST http://localhost:8000/getrecs \
   -H "X-API-Key: <API_READ_KEY>" \
   -H "Content-Type: application/json" \
-  -d '{"getField":"package.type_name","getTag":"example"}'
+  -d '{"type_name":"my_type"}'
+
+# Filtered by field value:
+curl -X POST http://localhost:8000/getrecs \
+  -H "X-API-Key: <API_READ_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"type_name":"my_type","getField":"field1","getTag":"hello"}'
+
+# Last 10 records:
+curl "http://localhost:8000/lastrecs?type_name=my_type" \
+  -H "X-API-Key: <API_READ_KEY>"
 ```
 
-Export DB, requires MASTER API key:
+Generate and use a JWT:
 
 ```bash
-curl -X GET http://localhost:8000/exportdb \
+TOKEN=$(curl -s -X POST http://localhost:8000/generate-token \
+  -H "X-API-Key: <API_WRITE_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"sub":"user-123"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['jwt'])")
+
+curl -X POST http://localhost:8000/post \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"type_name":"my_type","field1":"hello","field2":"world"}'
+```
+
+Reset all data:
+
+```bash
+curl -X DELETE http://localhost:8000/hardreset \
+  -H "X-API-Key: <API_MASTER_KEY>"
+```
+
+Export DB:
+
+```bash
+curl http://localhost:8000/exportdb \
   -H "X-API-Key: <API_MASTER_KEY>" \
   -o fastmongo-export.json
 ```
 
 ## Testing
 
-Syntax check:
-
-```bash
-./tests/test_syntax.sh
-```
-
-API smoke test (reads `.env` if present):
+API smoke test (reads `.env.test` if present, falls back to `.env`):
 
 ```bash
 ./tests/test_api.sh
 ```
 
-Smoke test requirements:
+Smoke test requirements in `.env.test`:
+- `API_URL`
 - `API_MASTER_KEY`
 - `API_WRITE_KEY`
 - `API_READ_KEY`
