@@ -46,7 +46,7 @@ echo ""
 echo "Current version : ${VERSION_NAME}"
 echo "Incoming version: ${NEW_VERSION}"
 echo ""
-read -r -p "Apply update from '${VERSION_NAME}' to '${NEW_VERSION}'? [Y/n] " confirm
+read -r -p "Apply update from '${VERSION_NAME}' to '${NEW_VERSION}'? [Y/n] " confirm </dev/tty
 if [[ "${confirm}" =~ ^[Nn]$ ]]; then
   echo "Update cancelled."
   exit 0
