@@ -16,7 +16,7 @@ from fastapi.responses import Response
 from bson import json_util
 from pymongo import MongoClient
 
-VERSION_NAME = "chips"
+VERSION_NAME = "bag"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -76,12 +76,29 @@ if not GETRECS_ALLOWED_TYPES:
 CORS_ORIGINS = [o.strip() for o in CORS_ORIGINS_RAW.split(",") if o.strip()]
 ALLOW_CORS = ALLOW_CORS_RAW.strip().lower() in {"1", "true", "yes", "on"}
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS if ALLOW_CORS else [],
-    allow_methods=["POST"],
-    allow_headers=["Content-Type"],
-)
+class SmartCORSMiddleware:
+    """Apply CORS only when the request carries no valid API key."""
+
+    def __init__(self, app_inner):
+        self._app = app_inner
+        self._cors = CORSMiddleware(
+            app_inner,
+            allow_origins=CORS_ORIGINS if ALLOW_CORS else [],
+            allow_methods=["GET", "POST", "DELETE"],
+            allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+        )
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            api_key = headers.get(b"x-api-key", b"").decode()
+            if _is_any_valid_api_key(api_key):
+                await self._app(scope, receive, send)
+                return
+        await self._cors(scope, receive, send)
+
+
+app.add_middleware(SmartCORSMiddleware)
 
 mongo_reader_client = MongoClient(
     host=MONGO_HOST,
