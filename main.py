@@ -16,7 +16,7 @@ from fastapi.responses import Response
 from bson import json_util
 from pymongo import MongoClient
 
-VERSION_NAME = "roku"
+VERSION_NAME = "bob"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -46,7 +46,6 @@ API_READ_KEY = os.getenv("API_READ_KEY")
 API_MASTER_KEY = os.getenv("API_MASTER_KEY")
 GETRECS_ALLOWED_TYPES_RAW = os.getenv("GETRECS_ALLOWED_TYPES")
 CORS_ORIGINS_RAW = os.getenv("CORS_ORIGINS", "")
-ALLOW_CORS_RAW = os.getenv("ALLOW_CORS", "true")
 
 if not MONGO_WRITER_PASSWORD:
     raise RuntimeError("Missing required env var: MONGO_WRITER_PASSWORD")
@@ -74,14 +73,38 @@ if not GETRECS_ALLOWED_TYPES:
     raise RuntimeError("GETRECS_ALLOWED_TYPES must include at least one type name")
 
 CORS_ORIGINS = [o.strip() for o in CORS_ORIGINS_RAW.split(",") if o.strip()]
-ALLOW_CORS = ALLOW_CORS_RAW.strip().lower() in {"1", "true", "yes", "on"}
 
-_cors_app = CORSMiddleware(
+_cors_restricted = CORSMiddleware(
     app=app,
-    allow_origins=CORS_ORIGINS if ALLOW_CORS else [],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
+_cors_open = CORSMiddleware(
+    app=app,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+)
+
+VALID_API_KEYS = {API_WRITE_KEY, API_READ_KEY, API_MASTER_KEY}
+
+
+async def cors_app(scope, receive, send):
+    """Route to open CORS if a valid API key is present, restricted CORS otherwise."""
+    if scope["type"] in ("http", "websocket"):
+        api_key = ""
+        for name, value in scope.get("headers", []):
+            if name == b"x-api-key":
+                api_key = value.decode()
+                break
+        if api_key in VALID_API_KEYS:
+            await _cors_open(scope, receive, send)
+            return
+    await _cors_restricted(scope, receive, send)
+
+
+api_app = cors_app
 
 mongo_reader_client = MongoClient(
     host=MONGO_HOST,
@@ -106,6 +129,7 @@ allowed_payloads_writer_collection.create_index("type_name", unique=True)
 
 rate_limit_lock = Lock()
 request_windows: Dict[str, Deque[float]] = defaultdict(deque)
+
 
 class TokenRequest(BaseModel):
     jwt: str = Field(..., min_length=20, max_length=4096)
@@ -269,7 +293,7 @@ def extract_bearer_token(authorization: str | None) -> str:
     if not authorization.startswith(prefix):
         raise HTTPException(status_code=401, detail="Authorization header must use Bearer token")
 
-    token = authorization[len(prefix) :].strip()
+    token = authorization[len(prefix):].strip()
     if not token:
         raise HTTPException(status_code=401, detail="Missing JWT token")
 
@@ -307,38 +331,8 @@ def validate_read_or_master_api_key(x_api_key: str | None) -> None:
     raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-def _is_any_valid_api_key(x_api_key: str | None) -> bool:
-    if not x_api_key:
-        return False
-    return (
-        secrets.compare_digest(x_api_key, API_WRITE_KEY)
-        or secrets.compare_digest(x_api_key, API_READ_KEY)
-        or secrets.compare_digest(x_api_key, API_MASTER_KEY)
-    )
-
-
-def _require_api_key_when_cors_disabled(x_api_key: str | None) -> None:
-    if ALLOW_CORS:
-        return
-    if not _is_any_valid_api_key(x_api_key):
-        raise HTTPException(status_code=401, detail="API key required when ALLOW_CORS is false")
-
-
-def _check_generate_token_auth(request: Request, x_api_key: str | None) -> None:
-    """Allow if caller supplies write/master key or allowed Origin."""
-    _require_api_key_when_cors_disabled(x_api_key)
-    if x_api_key:
-        validate_write_or_master_api_key(x_api_key)
-        return
-    origin = request.headers.get("origin", "")
-    if ALLOW_CORS and CORS_ORIGINS and origin in CORS_ORIGINS:
-        return
-    raise HTTPException(status_code=401, detail="Missing or invalid credentials for /generate-token")
-
-
 @app.get("/health")
-def health(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Dict[str, str]:
-    _require_api_key_when_cors_disabled(x_api_key)
+def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
@@ -348,7 +342,12 @@ async def generate_token(
     request: Request,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> TokenResponse:
-    _check_generate_token_auth(request, x_api_key)
+    if x_api_key:
+        validate_write_or_master_api_key(x_api_key)
+    else:
+        origin = request.headers.get("origin", "")
+        if not (CORS_ORIGINS and origin in CORS_ORIGINS):
+            raise HTTPException(status_code=401, detail="Missing or invalid credentials for /generate-token")
     token, expires_at = _create_token(payload.sub)
     return TokenResponse(jwt=token, expires_at=expires_at)
 
@@ -467,8 +466,6 @@ async def store_package(
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> Dict[str, str]:
-    _require_api_key_when_cors_disabled(x_api_key)
-    # Auth before any DB work.
     subject: str | None = None
     auth_method = "jwt"
     if x_api_key:
@@ -586,15 +583,3 @@ def export_database(x_api_key: str | None = Header(default=None, alias="X-API-Ke
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-
-
-async def asgi_app(scope, receive, send):
-    api_key = ""
-    for name, value in scope.get("headers", []):
-        if name == b"x-api-key":
-            api_key = value.decode()
-            break
-    if _is_any_valid_api_key(api_key):
-        await app(scope, receive, send)
-    else:
-        await _cors_app(scope, receive, send)

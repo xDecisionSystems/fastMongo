@@ -315,7 +315,7 @@ EOF_ENV
 write_systemd_service() {
   cat >/etc/systemd/system/fastmongo-api.service <<EOF_SERVICE
 [Unit]
-Description=fastMongo FastAPI service
+Description=fastMongo API service
 After=network-online.target ${MONGOD_SERVICE}.service
 Wants=network-online.target
 Requires=${MONGOD_SERVICE}.service
@@ -326,7 +326,7 @@ User=${APP_USER}
 Group=${APP_GROUP}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=/etc/fastmongo/fastmongo.env
-ExecStart=${APP_DIR}/.venv/bin/uvicorn main:asgi_app --host ${API_BIND_HOST} --port ${API_BIND_PORT}
+ExecStart=${APP_DIR}/.venv/bin/uvicorn main:cors_app --host ${API_BIND_HOST} --port ${API_BIND_PORT}
 Restart=always
 RestartSec=3
 
@@ -338,7 +338,6 @@ EOF_SERVICE
   systemctl enable fastmongo-api
   systemctl restart fastmongo-api
 
-  # Confirm the service actually came up.
   sleep 2
   if ! systemctl is-active --quiet fastmongo-api; then
     echo "fastmongo-api failed to start:"
