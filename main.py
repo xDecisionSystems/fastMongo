@@ -16,7 +16,7 @@ from fastapi.responses import Response
 from bson import json_util
 from pymongo import MongoClient
 
-VERSION_NAME = "bag"
+VERSION_NAME = "window"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -76,29 +76,12 @@ if not GETRECS_ALLOWED_TYPES:
 CORS_ORIGINS = [o.strip() for o in CORS_ORIGINS_RAW.split(",") if o.strip()]
 ALLOW_CORS = ALLOW_CORS_RAW.strip().lower() in {"1", "true", "yes", "on"}
 
-class SmartCORSMiddleware:
-    """Apply CORS only when the request carries no valid API key."""
-
-    def __init__(self, app_inner):
-        self._app = app_inner
-        self._cors = CORSMiddleware(
-            app_inner,
-            allow_origins=CORS_ORIGINS if ALLOW_CORS else [],
-            allow_methods=["GET", "POST", "DELETE"],
-            allow_headers=["Content-Type", "Authorization", "X-API-Key"],
-        )
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
-            headers = dict(scope.get("headers", []))
-            api_key = headers.get(b"x-api-key", b"").decode()
-            if _is_any_valid_api_key(api_key):
-                await self._app(scope, receive, send)
-                return
-        await self._cors(scope, receive, send)
-
-
-app.add_middleware(SmartCORSMiddleware)
+_cors_app = CORSMiddleware(
+    app=app,
+    allow_origins=CORS_ORIGINS if ALLOW_CORS else [],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+)
 
 mongo_reader_client = MongoClient(
     host=MONGO_HOST,
@@ -603,3 +586,15 @@ def export_database(x_api_key: str | None = Header(default=None, alias="X-API-Ke
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+async def asgi_app(scope, receive, send):
+    api_key = ""
+    for name, value in scope.get("headers", []):
+        if name == b"x-api-key":
+            api_key = value.decode()
+            break
+    if _is_any_valid_api_key(api_key):
+        await app(scope, receive, send)
+    else:
+        await _cors_app(scope, receive, send)

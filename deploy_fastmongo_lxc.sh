@@ -326,7 +326,7 @@ User=${APP_USER}
 Group=${APP_GROUP}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=/etc/fastmongo/fastmongo.env
-ExecStart=${APP_DIR}/.venv/bin/uvicorn main:app --host ${API_BIND_HOST} --port ${API_BIND_PORT}
+ExecStart=${APP_DIR}/.venv/bin/uvicorn main:asgi_app --host ${API_BIND_HOST} --port ${API_BIND_PORT}
 Restart=always
 RestartSec=3
 
