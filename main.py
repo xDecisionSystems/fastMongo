@@ -16,7 +16,7 @@ from fastapi.responses import Response
 from bson import json_util
 from pymongo import MongoClient
 
-VERSION_NAME = "bob"
+VERSION_NAME = "map"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -91,8 +91,13 @@ VALID_API_KEYS = {API_WRITE_KEY, API_READ_KEY, API_MASTER_KEY}
 
 
 async def cors_app(scope, receive, send):
-    """Route to open CORS if a valid API key is present, restricted CORS otherwise."""
-    if scope["type"] in ("http", "websocket"):
+    """Open CORS for preflight and API-key requests; restricted CORS otherwise."""
+    if scope["type"] == "http":
+        method = scope.get("method", "")
+        if method == "OPTIONS":
+            # Preflight never carries the API key — always allow so the actual request can proceed.
+            await _cors_open(scope, receive, send)
+            return
         api_key = ""
         for name, value in scope.get("headers", []):
             if name == b"x-api-key":
