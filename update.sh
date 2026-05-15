@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION_NAME="${VERSION_NAME:-unknown}"
-
 APP_DIR="/opt/fastmongo"
 APP_USER="fastmongo"
 APP_GROUP="fastmongo"
@@ -14,10 +12,21 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+if ! systemctl cat fastmongo-api &>/dev/null; then
+  echo "fastmongo-api service does not exist. Run deploy_fastmongo_lxc.sh first."
+  exit 1
+fi
+
 cleanup() {
   [[ -n "${STAGING_DIR}" && -d "${STAGING_DIR}" ]] && rm -rf "${STAGING_DIR}"
 }
 trap cleanup EXIT
+
+# Detect the currently installed version from the live file.
+CURRENT_VERSION="unknown"
+if [[ -f "${APP_DIR}/main.py" ]]; then
+  CURRENT_VERSION="$(grep -m1 '^VERSION_NAME\s*=' "${APP_DIR}/main.py" | sed 's/.*=\s*["\x27]\(.*\)["\x27]/\1/')"
+fi
 
 # Fetch all files into a staging dir first so nothing is changed until confirmed.
 STAGING_DIR="$(mktemp -d /tmp/fastmongo-update.XXXXXX)"
@@ -29,24 +38,25 @@ fetch_to_staging() {
 
 echo "Fetching latest files..."
 fetch_to_staging "main.py"
+fetch_to_staging "requirements.txt"
 fetch_to_staging "deploy_fastmongo_lxc.sh"
 fetch_to_staging "update.sh"
 
 # Extract the incoming version name from the new main.py.
 NEW_VERSION="$(grep -m1 '^VERSION_NAME\s*=' "${STAGING_DIR}/main.py" | sed 's/.*=\s*["\x27]\(.*\)["\x27]/\1/')"
 
-if [[ "${VERSION_NAME}" == "${NEW_VERSION}" ]]; then
-  echo "Current version : ${VERSION_NAME}"
+if [[ "${CURRENT_VERSION}" == "${NEW_VERSION}" ]]; then
+  echo "Current version : ${CURRENT_VERSION}"
   echo "Incoming version: ${NEW_VERSION}"
   echo "Already up to date. No update needed."
   exit 0
 fi
 
 echo ""
-echo "Current version : ${VERSION_NAME}"
+echo "Current version : ${CURRENT_VERSION}"
 echo "Incoming version: ${NEW_VERSION}"
 echo ""
-read -r -p "Apply update from '${VERSION_NAME}' to '${NEW_VERSION}'? [Y/n] " confirm </dev/tty
+read -r -p "Apply update from '${CURRENT_VERSION}' to '${NEW_VERSION}'? [Y/n] " confirm </dev/tty
 if [[ "${confirm}" =~ ^[Nn]$ ]]; then
   echo "Update cancelled."
   exit 0
@@ -60,8 +70,12 @@ install_file() {
 }
 
 install_file "main.py"                  "${APP_USER}:${APP_GROUP}" "0644"
+install_file "requirements.txt"         "${APP_USER}:${APP_GROUP}" "0644"
 install_file "deploy_fastmongo_lxc.sh"  "root:root"                "0700"
 install_file "update.sh"                "root:root"                "0700"
+
+echo "Installing dependencies..."
+"${APP_DIR}/.venv/bin/pip" install -q -r "${APP_DIR}/requirements.txt"
 
 echo "Updated to version: ${NEW_VERSION}"
 echo "Restarting fastmongo-api..."
