@@ -77,6 +77,13 @@ install_file "update.sh"                "root:root"                "0700"
 echo "Installing dependencies..."
 "${APP_DIR}/.venv/bin/pip" install -q -r "${APP_DIR}/requirements.txt"
 
+# Ensure the service unit points at the correct ASGI entrypoint.
+if grep -q 'main:app\b' /etc/systemd/system/fastmongo-api.service; then
+  sed -i 's|main:app\b|main:cors_app|g' /etc/systemd/system/fastmongo-api.service
+  systemctl daemon-reload
+  echo "Updated service unit to main:cors_app."
+fi
+
 echo "Updated to version: ${NEW_VERSION}"
 echo "Restarting fastmongo-api..."
 systemctl restart fastmongo-api
