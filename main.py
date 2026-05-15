@@ -16,7 +16,7 @@ from fastapi.responses import Response
 from bson import json_util
 from pymongo import MongoClient
 
-VERSION_NAME = "map"
+VERSION_NAME = "mic"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
