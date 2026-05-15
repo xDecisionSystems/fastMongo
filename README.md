@@ -11,8 +11,8 @@
 - `GET /allowed`: list all allowed types (`API_MASTER_KEY` required)
 - `DELETE /allowed/{type_name}`: delete an allowed type definition (`API_MASTER_KEY` required)
 - `POST /post`: store a payload (`API_WRITE_KEY`, `API_MASTER_KEY`, or JWT bearer)
-- `POST /getrecs`: query records by type and optional field (`API_READ_KEY` or `API_MASTER_KEY`)
-- `GET /lastrecs`: get last 10 records of a type (`API_READ_KEY` or `API_MASTER_KEY`)
+- `POST /getrecs`: query records by type and optional field (`API_READ_KEY`, `API_MASTER_KEY`, or JWT bearer)
+- `GET /lastrecs`: get last 10 records of a type (`API_READ_KEY`, `API_MASTER_KEY`, or JWT bearer)
 - `DELETE /records/{type_name}`: delete all records of a type (`API_MASTER_KEY` required)
 - `DELETE /hardreset`: delete all records and all allowed types (`API_MASTER_KEY` required)
 - `GET /exportdb`: export full DB (`API_MASTER_KEY` required)
@@ -39,8 +39,8 @@ Use this section as the strict interaction contract for automation agents.
 - `GET /allowed`: master key only.
 - `DELETE /allowed/{type_name}`: master key only.
 - `POST /post`: write/master key OR valid JWT bearer token.
-- `POST /getrecs`: read or master key.
-- `GET /lastrecs`: read or master key.
+- `POST /getrecs`: read/master key OR valid JWT bearer token.
+- `GET /lastrecs`: read/master key OR valid JWT bearer token.
 - `DELETE /records/{type_name}`: master key only.
 - `DELETE /hardreset`: master key only.
 - `GET /exportdb`: master key only.
@@ -241,7 +241,7 @@ Use this section as the strict interaction contract for automation agents.
 
 #### `POST /getrecs`
 
-- Auth: read or master key.
+- Auth: read/master key OR valid JWT bearer token.
 - `type_name` must be in `GETRECS_ALLOWED_TYPES` env var.
 - Query all records of a type:
 
@@ -271,14 +271,14 @@ Use this section as the strict interaction contract for automation agents.
 ```
 
 - Common failures:
-  - `401` invalid read/master key.
+  - `401` invalid read/master key or JWT.
   - `400` `type_name` not in `GETRECS_ALLOWED_TYPES`, or invalid `getField`/`getTag`.
 
 ---
 
 #### `GET /lastrecs`
 
-- Auth: read or master key.
+- Auth: read/master key OR valid JWT bearer token.
 - `type_name` must be in `GETRECS_ALLOWED_TYPES` env var.
 - Query parameter: `type_name`
 - Returns the 10 most recent records sorted by `stored_at` descending.
@@ -297,7 +297,7 @@ GET /lastrecs?type_name=my_type
 ```
 
 - Common failures:
-  - `401` invalid read/master key.
+  - `401` invalid read/master key or JWT.
   - `400` `type_name` not in `GETRECS_ALLOWED_TYPES`.
 
 ---
@@ -357,7 +357,7 @@ GET /lastrecs?type_name=my_type
 
 1. Call `POST /allowed` with master key to declare a `type_name` and its fields.
 2. Call `POST /post` with write/master key or JWT to store records.
-3. Call `POST /getrecs` or `GET /lastrecs` with read/master key to retrieve records.
+3. Call `POST /getrecs` or `GET /lastrecs` with read/master key or JWT bearer token to retrieve records.
 4. Call `DELETE /records/{type_name}` or `DELETE /hardreset` to clean up.
 
 ## Updating

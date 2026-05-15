@@ -325,14 +325,18 @@ def validate_write_or_master_api_key(x_api_key: str | None) -> None:
     raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-def validate_read_or_master_api_key(x_api_key: str | None) -> None:
-    if not x_api_key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    if (
+def validate_read_or_master_api_key(x_api_key: str | None, authorization: str | None = None) -> None:
+    if x_api_key and (
         secrets.compare_digest(x_api_key, API_READ_KEY)
         or secrets.compare_digest(x_api_key, API_MASTER_KEY)
     ):
         return
+    if authorization:
+        token = extract_bearer_token(authorization)
+        token_status, _ = _validate_token(token)
+        if token_status == "valid":
+            return
+        raise HTTPException(status_code=401, detail=f"JWT is {token_status}")
     raise HTTPException(status_code=401, detail="Invalid API key")
 
 
@@ -508,8 +512,9 @@ async def store_package(
 def get_records_by_field(
     payload: Dict[str, Any],
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> Dict[str, Any]:
-    validate_read_or_master_api_key(x_api_key)
+    validate_read_or_master_api_key(x_api_key, authorization)
 
     type_name = payload.get("type_name")
     get_field = payload.get("getField")
@@ -545,8 +550,9 @@ def get_records_by_field(
 def get_last_records(
     type_name: str,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> Dict[str, Any]:
-    validate_read_or_master_api_key(x_api_key)
+    validate_read_or_master_api_key(x_api_key, authorization)
 
     if not type_name.strip():
         raise HTTPException(status_code=400, detail="type_name must be a non-empty string")
